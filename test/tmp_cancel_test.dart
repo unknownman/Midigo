@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+// ignore_for_file: avoid_print
 
 void main() {
   testWidgets('diag cancel resolution', (WidgetTester tester) async {

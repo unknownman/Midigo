@@ -1,4 +1,5 @@
 import 'dart:async';
+// ignore_for_file: avoid_print
 import 'package:flutter_test/flutter_test.dart';
 import 'package:miditutor/midi/application/midi_event_stream.dart';
 import 'package:miditutor/midi/application/midi_raw_event_capture.dart';
@@ -17,7 +18,7 @@ RawMidiEvent ev(String s, int seq) => RawMidiEvent(
   channel: 0, note: 60, velocity: 1, rawBytes: const [0x90, 60, 1]);
 
 void main() {
-  testWidgets('dbg', (t) async {
+  test('dbg', () async {
     final f = Fake();
     final cap = MidiRawEventCapture(f);
     await cap.start('abc');

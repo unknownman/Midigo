@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:miditutor/diagnostics/midi_source_diagnostic_view.dart';
 import 'package:miditutor/midi/application/midi_device_connection.dart';
 import 'package:miditutor/midi/application/midi_device_discovery.dart';
+// ignore_for_file: avoid_print
 
 void main() {
   const channel = MethodChannel('piano_midi/macos');

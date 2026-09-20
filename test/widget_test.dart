@@ -76,7 +76,13 @@ void main() {
     expect(find.text('Session: session-abc'), findsOneWidget);
     expect(find.text('Captured Events: 0'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Disconnect'));
+    final disconnectButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Disconnect'),
+    );
+    await tester.runAsync<void>(() async {
+      disconnectButton.onPressed!();
+      await Future<void>.delayed(Duration.zero);
+    });
     await tester.pumpAndSettle();
 
     expect(find.text('Status: Disconnected'), findsOneWidget);
