@@ -180,8 +180,8 @@ final class CoreMIDIAdapter: NSObject, FlutterPlugin, FlutterStreamHandler {
         var client = MIDIClientRef()
         let clientStatus = MIDIClientCreateWithBlock(
             "piano_tutor_midi_client" as CFString,
-            nil,
-            &client
+            &client,
+            nil
         )
 
         guard clientStatus == noErr else { return false }
@@ -189,10 +189,11 @@ final class CoreMIDIAdapter: NSObject, FlutterPlugin, FlutterStreamHandler {
         var port = MIDIPortRef()
         let portStatus = MIDIInputPortCreateWithBlock(
             client,
-            "piano_tutor_midi_input" as CFString
-        ) { [weak self] packetList, _, _ in
+            "piano_tutor_midi_input" as CFString,
+            &port
+        ) { [weak self] packetList, _ in
             self?.handlePacketList(packetList)
-        } &port
+        }
 
         guard portStatus == noErr else {
             MIDIClientDispose(client)

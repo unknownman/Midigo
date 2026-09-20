@@ -4,10 +4,13 @@ import '../midi/application/midi_device_connection.dart';
 import '../midi/application/midi_device_discovery.dart';
 import '../midi/application/midi_event_stream.dart';
 import '../midi/application/midi_raw_event_capture.dart';
+import '../midi/application/raw_midi_export_sink.dart';
+import '../midi/application/raw_midi_jsonl_exporter.dart';
 import '../midi/domain/midi_connection_error.dart';
 import '../midi/domain/midi_connection_session.dart';
 import '../midi/domain/midi_connection_state.dart';
 import '../midi/domain/midi_source_info.dart';
+import '../midi/domain/raw_midi_event.dart';
 
 class MidiSourceDiagnosticView extends StatefulWidget {
   const MidiSourceDiagnosticView({
@@ -15,11 +18,13 @@ class MidiSourceDiagnosticView extends StatefulWidget {
     required this.discovery,
     required this.connection,
     this.captureFactory = _defaultCaptureStream,
+    this.exportSink,
   });
 
   final MidiDeviceDiscovery discovery;
   final MidiDeviceConnection connection;
   final MidiEventStream Function() captureFactory;
+  final RawMidiExportSink? exportSink;
 
   static MidiEventStream _defaultCaptureStream() => MacosMidiEventStream();
 
@@ -31,8 +36,13 @@ class MidiSourceDiagnosticView extends StatefulWidget {
 class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
   late Future<List<MidiSourceInfo>> _sources;
   late final MidiRawEventCapture _capture;
+  late final RawMidiExportSink _exportSink =
+      widget.exportSink ?? MacosRawMidiExportSink();
+  final RawMidiJsonlExporter _exporter = JsonlRawMidiEventExporter();
   bool _busy = false;
+  bool _exporting = false;
   String? _errorMessage;
+  String? _exportStatus;
 
   @override
   void initState() {
@@ -90,6 +100,47 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
       }
     }
   }
+
+  void _clearCapture() {
+    setState(() {
+      _capture.buffer.clear();
+    });
+  }
+
+  Future<void> _export() async {
+    if (_exporting) {
+      return;
+    }
+    setState(() {
+      _exporting = true;
+      _exportStatus = null;
+    });
+    try {
+      final content = _exporter.exportEvents(_capture.buffer.events);
+      final filename = midiExportFilename(widget.connection.currentSession?.sessionId);
+      await _exportSink.write(filename: filename, content: content);
+      if (mounted) {
+        setState(() => _exportStatus = 'JSONL exported');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _exportStatus = 'Export failed: ${e.runtimeType}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
+    }
+  }
+
+  static String _messageTypeLabel(RawMidiMessageType type) => switch (type) {
+        RawMidiMessageType.noteOn => 'note_on',
+        RawMidiMessageType.noteOff => 'note_off',
+        RawMidiMessageType.other => 'other',
+      };
+
+  static int _statusByte(RawMidiEvent event) =>
+      event.rawBytes.isEmpty ? 0 : event.rawBytes.first;
 
   String _stateLabel(MidiConnectionState state) {
     return switch (state) {
@@ -232,6 +283,7 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
         children: [
           Text('Status: ${_stateLabel(state)}'),
           Text('Session: ${session.sessionId}'),
+          Text('Connection: ${session.connectionType}'),
           const SizedBox(height: 8),
           FilledButton.tonal(
             onPressed: _busy ? null : _disconnect,
@@ -252,6 +304,7 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Status: ${_stateLabel(state)}'),
+        Text('Session: —'),
         const SizedBox(height: 8),
         OutlinedButton(
           onPressed: canConnect ? () => _connect(source) : null,
@@ -271,23 +324,25 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
           builder: (context, _, _) {
             final events = _capture.buffer.events;
             final headerText = 'Captured Events: ${events.length}';
-            final rows = events.length > _maxCaptureDisplayRows
-                ? events.sublist(events.length - _maxCaptureDisplayRows)
+            final rows = events.length > _maxRecentEventRows
+                ? events.sublist(events.length - _maxRecentEventRows)
                 : events;
             final lines = <String>[
-              '${'#'.padRight(5)}${'Time'.padRight(10)}'
-                  '${'Type'.padRight(9)}Ch  Note  Vel',
+              '${'Seq'.padRight(6)}${'Time'.padRight(12)}'
+                  '${'Type'.padRight(10)}${'Status'.padRight(8)}Data',
               for (final event in rows.reversed)
-                '${'${event.seq}'.padRight(5)}'
-                    '${'${event.appMonotonicTsMs}'.padRight(10)}'
-                    '${event.messageType.displayLabel.padRight(9)}'
-                    '${event.channel ?? '-'}    '
-                    '${event.note ?? '-'}    '
-                    '${event.velocity ?? '-'}',
+                '${'${event.seq}'.padRight(6)}'
+                    '${'${event.appMonotonicTsMs}'.padRight(12)}'
+                    '${_messageTypeLabel(event.messageType).padRight(10)}'
+                    '${'${_statusByte(event)}'.padRight(8)}'
+                    '[${event.rawBytes.join(',')}]',
             ];
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text('Capture: ${_capture.isActive ? 'Active' : 'Stopped'}',
+                    style: theme.textTheme.titleSmall),
+                const SizedBox(height: 4),
                 Text(headerText, style: theme.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 Container(
@@ -308,6 +363,25 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton(
+                      onPressed: _clearCapture,
+                      child: const Text('Clear Capture'),
+                    ),
+                    FilledButton(
+                      onPressed: _exporting ? null : _export,
+                      child: const Text('Export JSONL'),
+                    ),
+                  ],
+                ),
+                if (_exportStatus != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_exportStatus!, style: theme.textTheme.bodySmall),
+                ],
               ],
             );
           },
@@ -316,5 +390,9 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
     );
   }
 
-  static const int _maxCaptureDisplayRows = 18;
+  /// Maximum number of recent events rendered in the diagnostic table.
+  ///
+  /// This is a UI-only display bound; the underlying capture buffer is never
+  /// truncated and the JSONL export always contains every captured event.
+  static const int _maxRecentEventRows = 100;
 }
