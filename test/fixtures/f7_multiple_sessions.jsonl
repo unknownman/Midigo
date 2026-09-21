@@ -1,0 +1,4 @@
+{"schema_version":1,"session_id":"session-f7a","seq":0,"app_monotonic_ts_ms":1000,"message_type":"note_on","status":144,"data":[144,60,90]}
+{"schema_version":1,"session_id":"session-f7b","seq":0,"app_monotonic_ts_ms":100,"message_type":"note_on","status":144,"data":[144,60,90]}
+{"schema_version":1,"session_id":"session-f7a","seq":1,"app_monotonic_ts_ms":2000,"message_type":"note_on","status":144,"data":[144,64,90]}
+{"schema_version":1,"session_id":"session-f7b","seq":1,"app_monotonic_ts_ms":200,"message_type":"note_on","status":144,"data":[144,64,90]}
