@@ -8,8 +8,37 @@ import '../domain/normalized_midi_event.dart';
 /// paired (H2 session boundary rule).
 typedef NoteIdentity = (String sessionId, int channel, int pitch);
 
-/// Reflects up to three classifications for one repeated note identity:
-/// matched pair count, active instances, and unmatched note-offs.
+/// A successfully paired Note-On / Note-Off instance.
+///
+/// Deterministic pairing follows FIFO within one identity: the earliest
+/// active Note-On consumes the first matching Note-Off. A negative
+/// [durationMs] is retained verbatim as an integrity anomaly - it is never
+/// clamped or repaired.
+final class NotePair {
+  final NormalizedMidiEvent noteOn;
+  final NormalizedMidiEvent noteOff;
+
+  const NotePair({
+    required this.noteOn,
+    required this.noteOff,
+  });
+
+  int get durationMs =>
+      noteOff.sourceAppMonotonicTsMs - noteOn.sourceAppMonotonicTsMs;
+
+  String get sessionId => noteOn.sessionId;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NotePair && other.noteOn == noteOn && other.noteOff == noteOff;
+
+  @override
+  int get hashCode => Object.hash(noteOn, noteOff);
+}
+
+/// Reflects up to four classifications for one repeated note identity:
+/// matched pairs, active instances, unmatched note-offs, and durations.
 final class NotePairingReport {
   /// Note-Off events that had no matching active Note-On.
   final List<NormalizedMidiEvent> unmatchedNoteOffs;
@@ -23,6 +52,9 @@ final class NotePairingReport {
   /// Per identity, the number of completed Note-On -> Note-Off cycles.
   final Map<NoteIdentity, int> matchedPairsPerIdentity;
 
+  /// Successfully paired instances (FIFO within identity), in pairing order.
+  final List<NotePair> pairs;
+
   int get matchedPairCount =>
       matchedPairsPerIdentity.values.fold<int>(0, (a, b) => a + b);
 
@@ -35,6 +67,7 @@ final class NotePairingReport {
     required this.activeNoteOns,
     required this.maxActivePerIdentity,
     required this.matchedPairsPerIdentity,
+    required this.pairs,
   });
 }
 
@@ -54,6 +87,7 @@ final class NotePairingAnalyzer {
     final active = <NoteIdentity, List<NormalizedMidiEvent>>{};
     final maxActive = <NoteIdentity, int>{};
     final matched = <NoteIdentity, int>{};
+    final pairs = <NotePair>[];
 
     for (final event in events) {
       final channel = event.channel;
@@ -73,10 +107,11 @@ final class NotePairingAnalyzer {
           if (instances == null || instances.isEmpty) {
             unmatchedOffs.add(event);
           } else {
-            instances.removeAt(0);
+            final noteOn = instances.removeAt(0);
             if (instances.isEmpty) {
               active.remove(identity);
             }
+            pairs.add(NotePair(noteOn: noteOn, noteOff: event));
             matched[identity] = (matched[identity] ?? 0) + 1;
           }
         case NormalizedMidiMessageType.other:
@@ -95,6 +130,7 @@ final class NotePairingAnalyzer {
       activeNoteOns: List<NormalizedMidiEvent>.unmodifiable(remaining),
       maxActivePerIdentity: Map<NoteIdentity, int>.unmodifiable(maxActive),
       matchedPairsPerIdentity: Map<NoteIdentity, int>.unmodifiable(matched),
+      pairs: List<NotePair>.unmodifiable(pairs),
     );
   }
 }

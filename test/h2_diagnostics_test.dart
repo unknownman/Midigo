@@ -54,6 +54,30 @@ void main() {
       expect(candidates.single.deltaMs, 3);
     });
 
+    test('N11: candidate retains the configured threshold', () {
+      const detector = DuplicateCandidateDetector(thresholdMs: 5);
+      final candidates = detector.detect(norm(<RawMidiEvent>[
+        raw(seq: 0, ts: 1000, note: 60),
+        raw(seq: 1, ts: 1003, note: 60),
+      ]));
+
+      expect(candidates, hasLength(1));
+      expect(candidates.single.thresholdMs, 5);
+    });
+
+    test('N11: equal candidates compare equal by value', () {
+      const detector = DuplicateCandidateDetector(thresholdMs: 5);
+      final events = norm(<RawMidiEvent>[
+        raw(seq: 0, ts: 1000, note: 60),
+        raw(seq: 1, ts: 1003, note: 60),
+      ]);
+      final first = detector.detect(events);
+      final second = detector.detect(events);
+
+      expect(first.single, second.single);
+      expect(first.single.hashCode, second.single.hashCode);
+    });
+
     test('N11: candidate events are preserved, never deleted or merged', () {
       const detector = DuplicateCandidateDetector(thresholdMs: 5);
       final input = <RawMidiEvent>[

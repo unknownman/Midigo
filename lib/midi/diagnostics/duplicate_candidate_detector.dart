@@ -2,7 +2,8 @@ import '../domain/normalized_midi_event.dart';
 
 /// A pair of same-type events flagged by the duplicate-candidate signature.
 ///
-/// This is a diagnostic candidate only - the events are preserved.
+/// This is a diagnostic candidate only - the events are preserved. The
+/// configured [thresholdMs] used to flag the pair is retained for auditability.
 final class DuplicateCandidate {
   final NormalizedMidiEvent first;
   final NormalizedMidiEvent second;
@@ -10,11 +11,28 @@ final class DuplicateCandidate {
   /// `second.sourceAppMonotonicTsMs - first.sourceAppMonotonicTsMs`.
   final int deltaMs;
 
+  /// The threshold the detector was configured with when this candidate was
+  /// flagged.
+  final int thresholdMs;
+
   const DuplicateCandidate({
     required this.first,
     required this.second,
     required this.deltaMs,
+    required this.thresholdMs,
   });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DuplicateCandidate &&
+          other.first == first &&
+          other.second == second &&
+          other.deltaMs == deltaMs &&
+          other.thresholdMs == thresholdMs;
+
+  @override
+  int get hashCode => Object.hash(first, second, deltaMs, thresholdMs);
 }
 
 /// Detects duplicate candidates using the existing draft signature:
@@ -56,6 +74,7 @@ final class DuplicateCandidateDetector {
               first: previous,
               second: event,
               deltaMs: delta,
+              thresholdMs: thresholdMs,
             ),
           );
         }

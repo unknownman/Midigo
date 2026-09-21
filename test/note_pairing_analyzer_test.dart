@@ -120,4 +120,53 @@ void main() {
       expect(report.activeNoteOnCount, 0);
     });
   });
+
+  group('Note pairs (durations)', () {
+    test('pair exposes the exact paired events and a 500 ms duration', () {
+      final report = analyzer.analyze(norm(<RawMidiEvent>[
+        raw(seq: 0, ts: 1000, note: 60),
+        raw(seq: 1, ts: 1500, messageType: 'note_off', note: 60),
+      ]));
+
+      expect(report.pairs, hasLength(1));
+      expect(report.pairs.single.noteOn.sourceSeq, 0);
+      expect(report.pairs.single.noteOff.sourceSeq, 1);
+      expect(report.pairs.single.durationMs, 500);
+    });
+
+    test('a 0 ms duration pair is reported exactly', () {
+      final report = analyzer.analyze(norm(<RawMidiEvent>[
+        raw(seq: 0, ts: 1000, note: 60),
+        raw(seq: 1, ts: 1000, messageType: 'note_off', note: 60),
+      ]));
+
+      expect(report.pairs.single.durationMs, 0);
+    });
+
+    test('overlapping same-pitch instances pair FIFO with correct durations', () {
+      final report = analyzer.analyze(norm(<RawMidiEvent>[
+        raw(seq: 0, ts: 1000, note: 60), // on A
+        raw(seq: 1, ts: 1100, note: 60), // on B
+        raw(seq: 2, ts: 1200, messageType: 'note_off', note: 60), // off -> A
+        raw(seq: 3, ts: 1300, messageType: 'note_off', note: 60), // off -> B
+      ]));
+
+      expect(report.pairs, hasLength(2));
+      expect(report.pairs[0].noteOn.sourceSeq, 0);
+      expect(report.pairs[0].noteOff.sourceSeq, 2);
+      expect(report.pairs[0].durationMs, 200);
+      expect(report.pairs[1].noteOn.sourceSeq, 1);
+      expect(report.pairs[1].noteOff.sourceSeq, 3);
+      expect(report.pairs[1].durationMs, 200);
+    });
+
+    test('negative duration is preserved, not clamped', () {
+      final report = analyzer.analyze(norm(<RawMidiEvent>[
+        raw(seq: 0, ts: 2000, note: 60),
+        raw(seq: 1, ts: 1000, messageType: 'note_off', note: 60),
+      ]));
+
+      expect(report.pairs.single.durationMs, -1000);
+    });
+  });
 }
