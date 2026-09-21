@@ -152,6 +152,630 @@ enum PolicyResolutionLayer {
   };
 }
 
+/// Severity vocabulary shared by every dimension's grading bands.
+///
+/// The labels are deliberately DESCRIPTIVE. Equal labels across dimensions do
+/// not by themselves imply equal star impact; the star impact is materialized
+/// separately by the star aggregation policy.
+enum SeverityTier {
+  none,
+  negligible,
+  minor,
+  moderate,
+  major;
+
+  String get serialName => switch (this) {
+    SeverityTier.none => 'NONE',
+    SeverityTier.negligible => 'NEGLIGIBLE',
+    SeverityTier.minor => 'MINOR',
+    SeverityTier.moderate => 'MODERATE',
+    SeverityTier.major => 'MAJOR',
+  };
+
+  /// Ordinal severity rank; a larger rank is a worse error.
+  int get rank => index;
+
+  bool atLeast(SeverityTier other) => index >= other.index;
+}
+
+/// Outcome-state vocabulary of an evaluated musical target.
+///
+/// A real but extremely poor performance is [evaluated] with 0 stars; that is
+/// deliberately distinct from [notEnoughPerformance].
+enum EvaluationResultState {
+  notEnoughPerformance,
+  evaluated;
+
+  String get serialName => switch (this) {
+    EvaluationResultState.notEnoughPerformance => 'NOT_ENOUGH_PERFORMANCE',
+    EvaluationResultState.evaluated => 'EVALUATED',
+  };
+}
+
+/// Closed Error Vector reason-code vocabulary.
+enum ErrorVectorReasonCode {
+  pitchWrong,
+  pitchMissing,
+  pitchExtra,
+  timingEarly,
+  timingLate,
+  orderAdjacentInversion,
+  orderPartialInversion,
+  orderFullReversal,
+  ioiInconsistent,
+  simultaneitySpread,
+  retrievalLatencyUnavailable;
+
+  String get serialName => switch (this) {
+    ErrorVectorReasonCode.pitchWrong => 'PITCH_WRONG',
+    ErrorVectorReasonCode.pitchMissing => 'PITCH_MISSING',
+    ErrorVectorReasonCode.pitchExtra => 'PITCH_EXTRA',
+    ErrorVectorReasonCode.timingEarly => 'TIMING_EARLY',
+    ErrorVectorReasonCode.timingLate => 'TIMING_LATE',
+    ErrorVectorReasonCode.orderAdjacentInversion => 'ORDER_ADJACENT_INVERSION',
+    ErrorVectorReasonCode.orderPartialInversion => 'ORDER_PARTIAL_INVERSION',
+    ErrorVectorReasonCode.orderFullReversal => 'ORDER_FULL_REVERSAL',
+    ErrorVectorReasonCode.ioiInconsistent => 'IOI_INCONSISTENT',
+    ErrorVectorReasonCode.simultaneitySpread => 'SIMULTANEITY_SPREAD',
+    ErrorVectorReasonCode.retrievalLatencyUnavailable =>
+      'RETRIEVAL_LATENCY_UNAVAILABLE',
+  };
+}
+
+/// Rounding rule for a proportional tolerance value.
+enum ToleranceRoundingMode {
+  nearest;
+
+  String get serialName => 'NEAREST';
+}
+
+/// One severity band over a raw numeric measure (`<= upper` / `< upper`).
+///
+/// The final band is open-ended ([isOpen]); every other band must carry an
+/// explicit boundary so inclusive-vs-exclusive is never ambiguous.
+final class SeverityBand {
+  final SeverityTier severity;
+  final num? upperBound;
+  final PolicyBoundary? upperBoundary;
+
+  const SeverityBand({
+    required this.severity,
+    this.upperBound,
+    this.upperBoundary,
+  });
+
+  bool get isOpen => upperBound == null;
+
+  bool contains(num value) {
+    final bound = upperBound;
+    if (bound == null) {
+      return true;
+    }
+    return upperBoundary == PolicyBoundary.inclusive
+        ? value <= bound
+        : value < bound;
+  }
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'severity': severity.serialName,
+    'upper_bound': upperBound,
+    'upper_boundary': upperBoundary?.serialName,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SeverityBand &&
+          other.severity == severity &&
+          other.upperBound == upperBound &&
+          other.upperBoundary == upperBoundary;
+
+  @override
+  int get hashCode => Object.hash(severity, upperBound, upperBoundary);
+}
+
+/// Ordered [SeverityBand] table for one numeric measure, worst band last.
+///
+/// Classification is pure policy-data lookup: the table owns every numeric
+/// boundary, so no grading literal ever needs to appear in a consuming
+/// algorithm.
+final class SeverityBandTable {
+  final List<SeverityBand> bands;
+
+  SeverityBandTable({required List<SeverityBand> bands})
+    : bands = List<SeverityBand>.unmodifiable(bands);
+
+  /// The severity for [value], evaluated from least to most severe.
+  SeverityTier classify(num value) {
+    for (final band in bands) {
+      if (band.contains(value)) {
+        return band.severity;
+      }
+    }
+    return bands.last.severity;
+  }
+
+  /// Rejects malformed tables deterministically.
+  void validate() {
+    if (bands.isEmpty) {
+      throw const FormatException(
+        'SeverityBandTable: at least one band is required.',
+      );
+    }
+    final openCount = bands.where((band) => band.isOpen).length;
+    if (openCount != 1 || !bands.last.isOpen) {
+      throw const FormatException(
+        'SeverityBandTable: exactly one open-ended band is required, and it '
+        'must be the most severe band.',
+      );
+    }
+    for (var i = 0; i < bands.length; i++) {
+      final band = bands[i];
+      if (band.upperBound != null && band.upperBoundary == null) {
+        throw const FormatException(
+          'SeverityBandTable: a bounded band requires an explicit boundary.',
+        );
+      }
+      if (band.upperBound == null && band.upperBoundary != null) {
+        throw const FormatException(
+          'SeverityBandTable: an open band must not carry a boundary.',
+        );
+      }
+      if (i == 0) {
+        continue;
+      }
+      final previous = bands[i - 1];
+      if (band.severity.rank <= previous.severity.rank) {
+        throw const FormatException(
+          'SeverityBandTable: severities must strictly increase.',
+        );
+      }
+      final previousUpper = previous.upperBound;
+      final upper = band.upperBound;
+      if (previousUpper == null) {
+        throw const FormatException(
+          'SeverityBandTable: no band may follow the open-ended band.',
+        );
+      }
+      if (upper != null && upper <= previousUpper) {
+        throw const FormatException(
+          'SeverityBandTable: band bounds must strictly increase '
+          '(no overlap or inversion).',
+        );
+      }
+    }
+  }
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'bands': bands.map((band) => band.toMap()).toList(growable: false),
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SeverityBandTable && _severityBandListEq(other.bands, bands);
+
+  @override
+  int get hashCode => Object.hashAll(bands);
+}
+
+/// One missing-note-count bucket of the star ceiling table.
+final class MissingNoteCap {
+  final int minimumMissingCount;
+  final int? maxStars;
+
+  const MissingNoteCap({
+    required this.minimumMissingCount,
+    required this.maxStars,
+  });
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'minimum_missing_count': minimumMissingCount,
+    'max_stars': maxStars,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MissingNoteCap &&
+          other.minimumMissingCount == minimumMissingCount &&
+          other.maxStars == maxStars;
+
+  @override
+  int get hashCode => Object.hash(minimumMissingCount, maxStars);
+}
+
+/// Count-sensitive missing-note star ceiling table; the final bucket is open.
+final class MissingNoteCapTable {
+  final List<MissingNoteCap> caps;
+
+  MissingNoteCapTable({required List<MissingNoteCap> caps})
+    : caps = List<MissingNoteCap>.unmodifiable(caps);
+
+  /// The star ceiling for [missingCount]; null means no ceiling.
+  int? capForCount(int missingCount) {
+    var result = caps.first.maxStars;
+    for (final cap in caps) {
+      if (missingCount >= cap.minimumMissingCount) {
+        result = cap.maxStars;
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
+  void validate() {
+    if (caps.isEmpty || caps.first.minimumMissingCount != 0) {
+      throw const FormatException(
+        'MissingNoteCapTable: the first bucket must start at 0 missing notes.',
+      );
+    }
+    for (var i = 0; i < caps.length; i++) {
+      final cap = caps[i];
+      if (cap.maxStars != null && (cap.maxStars! < 0 || cap.maxStars! > 5)) {
+        throw const FormatException(
+          'MissingNoteCapTable: a star ceiling must be within 0..5.',
+        );
+      }
+      if (i == 0) {
+        continue;
+      }
+      if (cap.minimumMissingCount <= caps[i - 1].minimumMissingCount) {
+        throw const FormatException(
+          'MissingNoteCapTable: missing-count buckets must strictly increase.',
+        );
+      }
+      final previous = caps[i - 1].maxStars ?? 6;
+      final current = cap.maxStars ?? 6;
+      if (current >= previous) {
+        throw const FormatException(
+          'MissingNoteCapTable: star ceilings must strictly tighten as '
+          'missing notes increase.',
+        );
+      }
+    }
+  }
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'caps': caps.map((cap) => cap.toMap()).toList(growable: false),
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MissingNoteCapTable && _missingNoteCapListEq(other.caps, caps);
+
+  @override
+  int get hashCode => Object.hashAll(caps);
+}
+
+/// Tempo-aware proportional tolerance: `round(interval * percent / 100)`.
+final class ProportionalTolerance {
+  final int percent;
+  final ToleranceRoundingMode rounding;
+
+  const ProportionalTolerance({required this.percent, required this.rounding});
+
+  num toleranceMs(num expectedIntervalMs) {
+    final raw = expectedIntervalMs * percent / 100;
+    return switch (rounding) {
+      ToleranceRoundingMode.nearest => raw.round(),
+    };
+  }
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'percent': percent,
+    'rounding': rounding.serialName,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProportionalTolerance &&
+          other.percent == percent &&
+          other.rounding == rounding;
+
+  @override
+  int get hashCode => Object.hash(percent, rounding);
+}
+
+/// Evaluability: when a target is assessable at all.
+final class EvaluabilityPolicy {
+  final bool requiresStructuralAssociation;
+  final bool basedOnPitchCorrectness;
+  final bool zeroAssociationsMeansNotEnoughPerformance;
+  final String associationAuthority;
+
+  const EvaluabilityPolicy({
+    required this.requiresStructuralAssociation,
+    required this.basedOnPitchCorrectness,
+    required this.zeroAssociationsMeansNotEnoughPerformance,
+    required this.associationAuthority,
+  });
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'requires_structural_association': requiresStructuralAssociation,
+    'based_on_pitch_correctness': basedOnPitchCorrectness,
+    'zero_associations_means_not_enough_performance':
+        zeroAssociationsMeansNotEnoughPerformance,
+    'association_authority': associationAuthority,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EvaluabilityPolicy &&
+          other.requiresStructuralAssociation ==
+              requiresStructuralAssociation &&
+          other.basedOnPitchCorrectness == basedOnPitchCorrectness &&
+          other.zeroAssociationsMeansNotEnoughPerformance ==
+              zeroAssociationsMeansNotEnoughPerformance &&
+          other.associationAuthority == associationAuthority;
+
+  @override
+  int get hashCode => Object.hash(
+    requiresStructuralAssociation,
+    basedOnPitchCorrectness,
+    zeroAssociationsMeansNotEnoughPerformance,
+    associationAuthority,
+  );
+}
+
+/// Result-state semantics: NEP vs EVALUATED, and what stays outside.
+final class ResultStatePolicy {
+  final EvaluationResultState insufficientDataState;
+  final int evaluatedMinStars;
+  final int evaluatedMaxStars;
+  final bool producesAggregatePassFail;
+  final bool notEnoughPerformanceEqualsZeroStars;
+  final List<String> lifecycleStatesOutsideResult;
+
+  ResultStatePolicy({
+    required this.insufficientDataState,
+    required this.evaluatedMinStars,
+    required this.evaluatedMaxStars,
+    required this.producesAggregatePassFail,
+    required this.notEnoughPerformanceEqualsZeroStars,
+    required List<String> lifecycleStatesOutsideResult,
+  }) : lifecycleStatesOutsideResult = List<String>.unmodifiable(
+         lifecycleStatesOutsideResult,
+       );
+
+  void validate() {
+    if (evaluatedMinStars < 0 ||
+        evaluatedMaxStars > 5 ||
+        evaluatedMinStars > evaluatedMaxStars) {
+      throw const FormatException(
+        'ResultStatePolicy: the evaluated star range must be a valid 0..5 '
+        'sub-range.',
+      );
+    }
+  }
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'insufficient_data_state': insufficientDataState.serialName,
+    'evaluated_min_stars': evaluatedMinStars,
+    'evaluated_max_stars': evaluatedMaxStars,
+    'produces_aggregate_pass_fail': producesAggregatePassFail,
+    'not_enough_performance_equals_zero_stars':
+        notEnoughPerformanceEqualsZeroStars,
+    'lifecycle_states_outside_result': lifecycleStatesOutsideResult,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ResultStatePolicy &&
+          other.insufficientDataState == insufficientDataState &&
+          other.evaluatedMinStars == evaluatedMinStars &&
+          other.evaluatedMaxStars == evaluatedMaxStars &&
+          other.producesAggregatePassFail == producesAggregatePassFail &&
+          other.notEnoughPerformanceEqualsZeroStars ==
+              notEnoughPerformanceEqualsZeroStars &&
+          _stringListEq(
+            other.lifecycleStatesOutsideResult,
+            lifecycleStatesOutsideResult,
+          );
+
+  @override
+  int get hashCode => Object.hash(
+    insufficientDataState,
+    evaluatedMinStars,
+    evaluatedMaxStars,
+    producesAggregatePassFail,
+    notEnoughPerformanceEqualsZeroStars,
+    Object.hashAll(lifecycleStatesOutsideResult),
+  );
+}
+
+/// The Error Vector vocabulary policy: descriptive/diagnostic only.
+final class ErrorVectorPolicy {
+  final List<ErrorVectorReasonCode> reasonCodes;
+  final bool descriptiveOnly;
+  final bool carriesStarsOrWeights;
+  final bool mutatesMasteryEvidence;
+
+  ErrorVectorPolicy({
+    required List<ErrorVectorReasonCode> reasonCodes,
+    required this.descriptiveOnly,
+    required this.carriesStarsOrWeights,
+    required this.mutatesMasteryEvidence,
+  }) : reasonCodes = List<ErrorVectorReasonCode>.unmodifiable(reasonCodes);
+
+  void validate() {
+    final declared = reasonCodes.toSet();
+    if (declared.length != reasonCodes.length) {
+      throw const FormatException(
+        'ErrorVectorPolicy: duplicate reason-code definitions.',
+      );
+    }
+    for (final code in ErrorVectorReasonCode.values) {
+      if (!declared.contains(code)) {
+        throw FormatException(
+          'ErrorVectorPolicy: missing reason-code definition '
+          '${code.serialName}.',
+        );
+      }
+    }
+  }
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'reason_codes': reasonCodes
+        .map((code) => code.serialName)
+        .toList(growable: false),
+    'descriptive_only': descriptiveOnly,
+    'carries_stars_or_weights': carriesStarsOrWeights,
+    'mutates_mastery_evidence': mutatesMasteryEvidence,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ErrorVectorPolicy &&
+          _reasonCodeListEq(other.reasonCodes, reasonCodes) &&
+          other.descriptiveOnly == descriptiveOnly &&
+          other.carriesStarsOrWeights == carriesStarsOrWeights &&
+          other.mutatesMasteryEvidence == mutatesMasteryEvidence;
+
+  @override
+  int get hashCode => Object.hash(
+    Object.hashAll(reasonCodes),
+    descriptiveOnly,
+    carriesStarsOrWeights,
+    mutatesMasteryEvidence,
+  );
+}
+
+/// One immutable, descriptive Error Vector entry.
+///
+/// This carries diagnostics only: no stars, no weights, no mutation vocabulary.
+final class ErrorVectorEntry {
+  final EvaluationDimension dimension;
+  final SeverityTier severity;
+  final ErrorVectorReasonCode reasonCode;
+  final Object? expectedValue;
+  final Object? observedValue;
+  final num? signedDelta;
+  final int? count;
+  final Map<String, Object?>? context;
+
+  ErrorVectorEntry({
+    required this.dimension,
+    required this.severity,
+    required this.reasonCode,
+    this.expectedValue,
+    this.observedValue,
+    this.signedDelta,
+    this.count,
+    Map<String, Object?>? context,
+  }) : context = context == null
+           ? null
+           : Map<String, Object?>.unmodifiable(context);
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    'dimension': _dimensionSerial(dimension),
+    'severity': severity.serialName,
+    'reason_code': reasonCode.serialName,
+    'expected_value': expectedValue,
+    'observed_value': observedValue,
+    'signed_delta': signedDelta,
+    'count': count,
+    'context': context,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ErrorVectorEntry &&
+          other.dimension == dimension &&
+          other.severity == severity &&
+          other.reasonCode == reasonCode &&
+          other.expectedValue == expectedValue &&
+          other.observedValue == observedValue &&
+          other.signedDelta == signedDelta &&
+          other.count == count &&
+          _nullableMapEq(other.context, context);
+
+  @override
+  int get hashCode => Object.hash(
+    dimension,
+    severity,
+    reasonCode,
+    expectedValue,
+    observedValue,
+    signedDelta,
+    count,
+    context == null ? null : _nullableMapHash(context!),
+  );
+}
+
+/// Materialized per-mode applicability: exactly one state per dimension.
+final class EvaluationPolicyApplicability {
+  final Map<TargetMode, Set<EvaluationDimension>> enabled;
+  final Map<TargetMode, Set<EvaluationDimension>> notApplicable;
+
+  EvaluationPolicyApplicability({
+    required Map<TargetMode, Set<EvaluationDimension>> enabled,
+    required Map<TargetMode, Set<EvaluationDimension>> notApplicable,
+  }) : enabled = _freezeDimensionSets(enabled),
+       notApplicable = _freezeDimensionSets(notApplicable);
+
+  void validate() {
+    for (final mode in TargetMode.values) {
+      final modeEnabled = enabled[mode];
+      final modeNotApplicable = notApplicable[mode];
+      if (modeEnabled == null || modeNotApplicable == null) {
+        throw FormatException(
+          'EvaluationPolicyApplicability: missing applicability for '
+          '${mode.name}.',
+        );
+      }
+      if (modeEnabled.intersection(modeNotApplicable).isNotEmpty) {
+        throw FormatException(
+          'EvaluationPolicyApplicability: ambiguous applicability for '
+          '${mode.name}.',
+        );
+      }
+      if (modeEnabled.union(modeNotApplicable).length !=
+          EvaluationDimension.values.length) {
+        throw FormatException(
+          'EvaluationPolicyApplicability: incomplete applicability for '
+          '${mode.name}.',
+        );
+      }
+    }
+  }
+
+  EvaluationDimensionState stateFor(
+    TargetMode mode,
+    EvaluationDimension dimension,
+  ) => enabled[mode]!.contains(dimension)
+      ? EvaluationDimensionState.enabled
+      : EvaluationDimensionState.notApplicable;
+
+  Map<String, Object?> toMap() => <String, Object?>{
+    for (final mode in TargetMode.values)
+      mode.name: <String, Object?>{
+        'enabled': _dimensionSerials(enabled[mode] ?? const {}),
+        'not_applicable': _dimensionSerials(notApplicable[mode] ?? const {}),
+      },
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EvaluationPolicyApplicability &&
+          _applicabilityMapEq(other.enabled, enabled) &&
+          _applicabilityMapEq(other.notApplicable, notApplicable);
+
+  @override
+  int get hashCode => Object.hash(
+    _applicabilityMapHash(enabled),
+    _applicabilityMapHash(notApplicable),
+  );
+}
+
 /// A policy tolerance value. Unresolved until the product defines it.
 ///
 /// When [ms] is present, an explicit [PolicyBoundary] is REQUIRED so that
@@ -222,24 +846,41 @@ final class StarBand {
 
 /// Missing-note star behavior.
 ///
-/// Decided: one missing note in an otherwise clean performance caps at 4
-/// stars; missing notes are count-sensitive. Per-additional-note steps and all
-/// band widths remain unresolved.
+/// Count-sensitive: one missing note caps at 4 stars and each additional
+/// missing-note bucket tightens the ceiling (3, then 2, then 1). The ceiling is
+/// applied AFTER base + trims and never invalidates simultaneity of performed
+/// notes.
 final class MissingNoteStarPolicy {
   final bool countSensitive;
   final int? oneMissingNoteCapStars;
+
+  /// Legacy single-step slot; superseded by [capTable], retained for
+  /// compatibility.
   final int? perAdditionalMissingCapStars;
 
-  const MissingNoteStarPolicy({
+  final MissingNoteCapTable capTable;
+  final bool appliedAfterBaseAndTrims;
+  final bool isCeilingNotSeverity;
+  final bool invalidatesSimultaneity;
+
+  MissingNoteStarPolicy({
     required this.countSensitive,
     required this.oneMissingNoteCapStars,
     required this.perAdditionalMissingCapStars,
+    required this.capTable,
+    required this.appliedAfterBaseAndTrims,
+    required this.isCeilingNotSeverity,
+    required this.invalidatesSimultaneity,
   });
 
   Map<String, Object?> toMap() => <String, Object?>{
     'count_sensitive': countSensitive,
     'one_missing_note_cap_stars': oneMissingNoteCapStars,
     'per_additional_missing_cap_stars': perAdditionalMissingCapStars,
+    'cap_table': capTable.toMap(),
+    'applied_after_base_and_trims': appliedAfterBaseAndTrims,
+    'is_ceiling_not_severity': isCeilingNotSeverity,
+    'invalidates_simultaneity': invalidatesSimultaneity,
   };
 
   @override
@@ -248,31 +889,46 @@ final class MissingNoteStarPolicy {
       other is MissingNoteStarPolicy &&
           other.countSensitive == countSensitive &&
           other.oneMissingNoteCapStars == oneMissingNoteCapStars &&
-          other.perAdditionalMissingCapStars == perAdditionalMissingCapStars;
+          other.perAdditionalMissingCapStars == perAdditionalMissingCapStars &&
+          other.capTable == capTable &&
+          other.appliedAfterBaseAndTrims == appliedAfterBaseAndTrims &&
+          other.isCeilingNotSeverity == isCeilingNotSeverity &&
+          other.invalidatesSimultaneity == invalidatesSimultaneity;
 
   @override
   int get hashCode => Object.hash(
     countSensitive,
     oneMissingNoteCapStars,
     perAdditionalMissingCapStars,
+    capTable,
+    appliedAfterBaseAndTrims,
+    isCeilingNotSeverity,
+    invalidatesSimultaneity,
   );
 }
 
 /// Extra-note star behavior.
 ///
-/// Decided: extra notes do not impose a hard star cap.
+/// Decided: extra notes do not impose a hard star cap and are excluded from
+/// required-note simultaneity.
 final class ExtraNoteStarPolicy {
   final bool imposesHardCap;
   final int? hardCapStars;
+  final bool excludedFromSimultaneity;
+  final SeverityBandTable severityByCount;
 
-  const ExtraNoteStarPolicy({
+  ExtraNoteStarPolicy({
     required this.imposesHardCap,
     required this.hardCapStars,
+    required this.excludedFromSimultaneity,
+    required this.severityByCount,
   });
 
   Map<String, Object?> toMap() => <String, Object?>{
     'imposes_hard_cap': imposesHardCap,
     'hard_cap_stars': hardCapStars,
+    'excluded_from_simultaneity': excludedFromSimultaneity,
+    'severity_by_count': severityByCount.toMap(),
   };
 
   @override
@@ -280,18 +936,25 @@ final class ExtraNoteStarPolicy {
       identical(this, other) ||
       other is ExtraNoteStarPolicy &&
           other.imposesHardCap == imposesHardCap &&
-          other.hardCapStars == hardCapStars;
+          other.hardCapStars == hardCapStars &&
+          other.excludedFromSimultaneity == excludedFromSimultaneity &&
+          other.severityByCount == severityByCount;
 
   @override
-  int get hashCode => Object.hash(imposesHardCap, hardCapStars);
+  int get hashCode => Object.hash(
+    imposesHardCap,
+    hardCapStars,
+    excludedFromSimultaneity,
+    severityByCount,
+  );
 }
 
-/// The 5..0 star quality policy.
+/// The 5..0 star quality policy, fully materialized.
 ///
-/// Band thresholds are UNRESOLVED. Decided semantics are materialized:
-/// worst-error-with-minor-trims primary model, 0 stars permitted for a real
-/// poor performance, no star cap by default, lesson capacity 10 stars,
-/// progress tracked against capacity. Minor-trim count is unresolved.
+/// The primary tier is selected from the worst severity; additional
+/// non-negligible errors trim whole stars, capped at [minorTrimCount]. The
+/// missing-note ceiling is applied last. No percentage-based correct-content
+/// formula is used.
 final class StarQualityPolicy {
   final PrimarySeverityModel primarySeverityModel;
   final bool allowZeroStars;
@@ -300,6 +963,16 @@ final class StarQualityPolicy {
   final ExtraNoteStarPolicy extraNote;
   final int? lessonStarCapacity;
   final StarAccumulationKind accumulation;
+
+  final Map<SeverityTier, int> baseStars;
+  final SeverityTier minimumTrimSeverity;
+  final bool worstErrorEstablishesBase;
+  final bool worstErrorTrims;
+  final bool fractionalStars;
+  final bool lessonStarsMonotonic;
+  final bool lessonStarsDecay;
+  final bool lessonStarsSeparateFromMastery;
+  final int? tempoProgressionThresholdStars;
 
   final List<StarBand> bands;
 
@@ -320,8 +993,18 @@ final class StarQualityPolicy {
     required this.extraNote,
     required this.lessonStarCapacity,
     required this.accumulation,
+    required Map<SeverityTier, int> baseStars,
+    required this.minimumTrimSeverity,
+    required this.worstErrorEstablishesBase,
+    required this.worstErrorTrims,
+    required this.fractionalStars,
+    required this.lessonStarsMonotonic,
+    required this.lessonStarsDecay,
+    required this.lessonStarsSeparateFromMastery,
+    required this.tempoProgressionThresholdStars,
     required List<StarBand> bands,
-  }) : bands = List<StarBand>.unmodifiable(bands) {
+  }) : baseStars = Map<SeverityTier, int>.unmodifiable(baseStars),
+       bands = List<StarBand>.unmodifiable(bands) {
     if (bands.length != standardBands.length) {
       throw const FormatException(
         'StarQualityPolicy: the star model must expose bands 5..0.',
@@ -331,6 +1014,38 @@ final class StarQualityPolicy {
 
   bool get anyBandBoundaryResolved => bands.any((band) => band.isResolved);
 
+  void validate() {
+    for (final tier in SeverityTier.values) {
+      if (!baseStars.containsKey(tier)) {
+        throw FormatException(
+          'StarQualityPolicy: missing base star mapping for '
+          '${tier.serialName}.',
+        );
+      }
+      final stars = baseStars[tier]!;
+      if (stars < 0 || stars > 5) {
+        throw FormatException(
+          'StarQualityPolicy: base stars for ${tier.serialName} must be '
+          'within 0..5.',
+        );
+      }
+    }
+    final trimCount = minorTrimCount;
+    if (trimCount == null || trimCount < 0 || trimCount > 5) {
+      throw const FormatException(
+        'StarQualityPolicy: the trim count must be materialized within 0..5.',
+      );
+    }
+    if (fractionalStars) {
+      throw const FormatException(
+        'StarQualityPolicy: fractional stars are not permitted by the MVP '
+        'policy.',
+      );
+    }
+    missingNote.capTable.validate();
+    extraNote.severityByCount.validate();
+  }
+
   Map<String, Object?> toMap() => <String, Object?>{
     'primary_severity_model': primarySeverityModel.serialName,
     'allow_zero_stars': allowZeroStars,
@@ -339,6 +1054,17 @@ final class StarQualityPolicy {
     'extra_note': extraNote.toMap(),
     'lesson_star_capacity': lessonStarCapacity,
     'accumulation': accumulation.serialName,
+    'base_stars': <String, Object?>{
+      for (final entry in baseStars.entries) entry.key.serialName: entry.value,
+    },
+    'minimum_trim_severity': minimumTrimSeverity.serialName,
+    'worst_error_establishes_base': worstErrorEstablishesBase,
+    'worst_error_trims': worstErrorTrims,
+    'fractional_stars': fractionalStars,
+    'lesson_stars_monotonic': lessonStarsMonotonic,
+    'lesson_stars_decay': lessonStarsDecay,
+    'lesson_stars_separate_from_mastery': lessonStarsSeparateFromMastery,
+    'tempo_progression_threshold_stars': tempoProgressionThresholdStars,
     'bands': bands.map((band) => band.toMap()).toList(growable: false),
   };
 
@@ -353,6 +1079,17 @@ final class StarQualityPolicy {
           other.extraNote == extraNote &&
           other.lessonStarCapacity == lessonStarCapacity &&
           other.accumulation == accumulation &&
+          _severityStarMapEq(other.baseStars, baseStars) &&
+          other.minimumTrimSeverity == minimumTrimSeverity &&
+          other.worstErrorEstablishesBase == worstErrorEstablishesBase &&
+          other.worstErrorTrims == worstErrorTrims &&
+          other.fractionalStars == fractionalStars &&
+          other.lessonStarsMonotonic == lessonStarsMonotonic &&
+          other.lessonStarsDecay == lessonStarsDecay &&
+          other.lessonStarsSeparateFromMastery ==
+              lessonStarsSeparateFromMastery &&
+          other.tempoProgressionThresholdStars ==
+              tempoProgressionThresholdStars &&
           _starBandListEq(other.bands, bands);
 
   @override
@@ -364,6 +1101,15 @@ final class StarQualityPolicy {
     extraNote,
     lessonStarCapacity,
     accumulation,
+    _severityStarMapHash(baseStars),
+    minimumTrimSeverity,
+    worstErrorEstablishesBase,
+    worstErrorTrims,
+    fractionalStars,
+    lessonStarsMonotonic,
+    lessonStarsDecay,
+    lessonStarsSeparateFromMastery,
+    tempoProgressionThresholdStars,
     Object.hashAll(bands),
   );
 }
@@ -380,54 +1126,125 @@ sealed class DimensionPolicySpec {
   Map<String, Object?> toMap();
 }
 
-/// Pitch policy. No comparison tolerance is established in the repository;
-/// the spec remains an explicit, upgradeable slot.
+/// Pitch policy: exact MIDI identity with strict one-to-one matching.
+///
+/// Extra notes are not pitch errors; missing notes are handled by the
+/// missing-note star ceiling, and mismatched required notes are counted as
+/// wrong notes.
 final class PitchPolicySpec extends DimensionPolicySpec {
-  const PitchPolicySpec({
+  final bool exactMidiIdentity;
+  final bool oneToOneMatching;
+  final bool toleranceApplied;
+  final bool spellingComparison;
+  final bool rematchingAllowed;
+  final String alignmentAuthority;
+  final bool extraNotesArePitchErrors;
+  final SeverityBandTable wrongNoteSeverity;
+
+  PitchPolicySpec({
     super.unavailableHandling = UnavailableHandling.noPenalty,
+    required this.exactMidiIdentity,
+    required this.oneToOneMatching,
+    required this.toleranceApplied,
+    required this.spellingComparison,
+    required this.rematchingAllowed,
+    required this.alignmentAuthority,
+    required this.extraNotesArePitchErrors,
+    required this.wrongNoteSeverity,
   });
 
   @override
   Map<String, Object?> toMap() => <String, Object?>{
     'unavailable_handling': unavailableHandling.serialName,
+    'exact_midi_identity': exactMidiIdentity,
+    'one_to_one_matching': oneToOneMatching,
+    'tolerance_applied': toleranceApplied,
+    'spelling_comparison': spellingComparison,
+    'rematching_allowed': rematchingAllowed,
+    'alignment_authority': alignmentAuthority,
+    'extra_notes_are_pitch_errors': extraNotesArePitchErrors,
+    'wrong_note_severity': wrongNoteSeverity.toMap(),
   };
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is PitchPolicySpec &&
-          other.unavailableHandling == unavailableHandling;
+          other.unavailableHandling == unavailableHandling &&
+          other.exactMidiIdentity == exactMidiIdentity &&
+          other.oneToOneMatching == oneToOneMatching &&
+          other.toleranceApplied == toleranceApplied &&
+          other.spellingComparison == spellingComparison &&
+          other.rematchingAllowed == rematchingAllowed &&
+          other.alignmentAuthority == alignmentAuthority &&
+          other.extraNotesArePitchErrors == extraNotesArePitchErrors &&
+          other.wrongNoteSeverity == wrongNoteSeverity;
 
   @override
-  int get hashCode => unavailableHandling.hashCode;
+  int get hashCode => Object.hash(
+    unavailableHandling,
+    exactMidiIdentity,
+    oneToOneMatching,
+    toleranceApplied,
+    spellingComparison,
+    rematchingAllowed,
+    alignmentAuthority,
+    extraNotesArePitchErrors,
+    wrongNoteSeverity,
+  );
 }
 
 /// Timing policy.
 ///
-/// Decided: first note establishes the start reference; tolerance tightens as
-/// tempo increases. The tempo-dependency model and all numeric tolerances are
-/// UNRESOLVED.
+/// Two independent concepts are materialized: a proportional tolerance
+/// (`round(expectedInterval * percent / 100)`) and a proportional severity
+/// band table. The first note is the start reference and first-note lateness is
+/// not penalized.
 final class TimingPolicySpec extends DimensionPolicySpec {
   final bool firstNoteIsStartReference;
+  final bool firstNoteLatenessPenalized;
   final bool tightensWithTempo;
   final TimingTempoDependencyKind? tempoDependencyKind;
   final ToleranceSpec? baseTolerance;
+  final ProportionalTolerance toleranceRatio;
+  final SeverityBandTable severityBands;
+  final num severityReferenceIntervalMs;
 
   const TimingPolicySpec({
     super.unavailableHandling = UnavailableHandling.noPenalty,
     required this.firstNoteIsStartReference,
+    required this.firstNoteLatenessPenalized,
     required this.tightensWithTempo,
     required this.tempoDependencyKind,
     required this.baseTolerance,
+    required this.toleranceRatio,
+    required this.severityBands,
+    required this.severityReferenceIntervalMs,
   });
+
+  /// Severity of a raw timing deviation, expressed relative to the expected
+  /// interval. Pure policy-data lookup; owns no literal.
+  SeverityTier classifySeverity({
+    required num deviationMs,
+    required num expectedIntervalMs,
+  }) {
+    if (expectedIntervalMs == 0) {
+      return severityBands.classify(deviationMs);
+    }
+    return severityBands.classify(deviationMs * 100 / expectedIntervalMs);
+  }
 
   @override
   Map<String, Object?> toMap() => <String, Object?>{
     'unavailable_handling': unavailableHandling.serialName,
     'first_note_is_start_reference': firstNoteIsStartReference,
+    'first_note_lateness_penalized': firstNoteLatenessPenalized,
     'tightens_with_tempo': tightensWithTempo,
     'tempo_dependency_kind': tempoDependencyKind?.serialName,
     'base_tolerance': baseTolerance?.toMap(),
+    'tolerance_ratio': toleranceRatio.toMap(),
+    'severity_bands': severityBands.toMap(),
+    'severity_reference_interval_ms': severityReferenceIntervalMs,
   };
 
   @override
@@ -436,36 +1253,60 @@ final class TimingPolicySpec extends DimensionPolicySpec {
       other is TimingPolicySpec &&
           other.unavailableHandling == unavailableHandling &&
           other.firstNoteIsStartReference == firstNoteIsStartReference &&
+          other.firstNoteLatenessPenalized == firstNoteLatenessPenalized &&
           other.tightensWithTempo == tightensWithTempo &&
           other.tempoDependencyKind == tempoDependencyKind &&
-          other.baseTolerance == baseTolerance;
+          other.baseTolerance == baseTolerance &&
+          other.toleranceRatio == toleranceRatio &&
+          other.severityBands == severityBands &&
+          other.severityReferenceIntervalMs == severityReferenceIntervalMs;
 
   @override
   int get hashCode => Object.hash(
     unavailableHandling,
     firstNoteIsStartReference,
+    firstNoteLatenessPenalized,
     tightensWithTempo,
     tempoDependencyKind,
     baseTolerance,
+    toleranceRatio,
+    severityBands,
+    severityReferenceIntervalMs,
   );
 }
 
 /// Order policy.
 ///
-/// Decided: order is an independent dimension with lower impact than primary
-/// pitch errors; the exact trim magnitude is unresolved.
+/// Order is an independent dimension with lower impact than primary pitch
+/// errors. Inversion classes map to descriptive severities; the star impact is
+/// applied by the shared star aggregation policy.
 final class OrderPolicySpec extends DimensionPolicySpec {
   final OrderImpactTier impactTier;
+  final SeverityTier adjacentInversionSeverity;
+  final SeverityTier partialInversionSeverity;
+  final SeverityTier fullReversalSeverity;
+  final bool independentOfPitch;
+  final bool rematchingAllowed;
 
   const OrderPolicySpec({
     super.unavailableHandling = UnavailableHandling.noPenalty,
     required this.impactTier,
+    required this.adjacentInversionSeverity,
+    required this.partialInversionSeverity,
+    required this.fullReversalSeverity,
+    required this.independentOfPitch,
+    required this.rematchingAllowed,
   });
 
   @override
   Map<String, Object?> toMap() => <String, Object?>{
     'unavailable_handling': unavailableHandling.serialName,
     'impact_tier': impactTier.serialName,
+    'adjacent_inversion_severity': adjacentInversionSeverity.serialName,
+    'partial_inversion_severity': partialInversionSeverity.serialName,
+    'full_reversal_severity': fullReversalSeverity.serialName,
+    'independent_of_pitch': independentOfPitch,
+    'rematching_allowed': rematchingAllowed,
   };
 
   @override
@@ -473,25 +1314,54 @@ final class OrderPolicySpec extends DimensionPolicySpec {
       identical(this, other) ||
       other is OrderPolicySpec &&
           other.unavailableHandling == unavailableHandling &&
-          other.impactTier == impactTier;
+          other.impactTier == impactTier &&
+          other.adjacentInversionSeverity == adjacentInversionSeverity &&
+          other.partialInversionSeverity == partialInversionSeverity &&
+          other.fullReversalSeverity == fullReversalSeverity &&
+          other.independentOfPitch == independentOfPitch &&
+          other.rematchingAllowed == rematchingAllowed;
 
   @override
-  int get hashCode => Object.hash(unavailableHandling, impactTier);
+  int get hashCode => Object.hash(
+    unavailableHandling,
+    impactTier,
+    adjacentInversionSeverity,
+    partialInversionSeverity,
+    fullReversalSeverity,
+    independentOfPitch,
+    rematchingAllowed,
+  );
 }
 
-/// IOI policy. All comparison semantics and tolerances are UNRESOLVED.
+/// IOI policy.
+///
+/// Inter-onset-interval consistency is measured against the learner's own mean
+/// interval; the same deviation is never double-charged as a timing error.
 final class IoiPolicySpec extends DimensionPolicySpec {
   final ToleranceSpec? tolerance;
+  final SeverityBandTable severityBands;
+  final String comparisonBasis;
+  final bool doubleChargesTiming;
 
-  const IoiPolicySpec({
+  IoiPolicySpec({
     super.unavailableHandling = UnavailableHandling.noPenalty,
     required this.tolerance,
+    required this.severityBands,
+    required this.comparisonBasis,
+    required this.doubleChargesTiming,
   });
+
+  /// Severity for a percent deviation from the learner's mean interval.
+  SeverityTier classifySeverity(num deviationPercent) =>
+      severityBands.classify(deviationPercent);
 
   @override
   Map<String, Object?> toMap() => <String, Object?>{
     'unavailable_handling': unavailableHandling.serialName,
     'tolerance': tolerance?.toMap(),
+    'severity_bands': severityBands.toMap(),
+    'comparison_basis': comparisonBasis,
+    'double_charges_timing': doubleChargesTiming,
   };
 
   @override
@@ -499,10 +1369,19 @@ final class IoiPolicySpec extends DimensionPolicySpec {
       identical(this, other) ||
       other is IoiPolicySpec &&
           other.unavailableHandling == unavailableHandling &&
-          other.tolerance == tolerance;
+          other.tolerance == tolerance &&
+          other.severityBands == severityBands &&
+          other.comparisonBasis == comparisonBasis &&
+          other.doubleChargesTiming == doubleChargesTiming;
 
   @override
-  int get hashCode => Object.hash(unavailableHandling, tolerance);
+  int get hashCode => Object.hash(
+    unavailableHandling,
+    tolerance,
+    severityBands,
+    comparisonBasis,
+    doubleChargesTiming,
+  );
 }
 
 /// Simultaneity policy.
@@ -513,23 +1392,48 @@ final class IoiPolicySpec extends DimensionPolicySpec {
 /// value is UNRESOLVED.
 final class SimultaneityPolicySpec extends DimensionPolicySpec {
   final Map<LearnerLevelKey, ToleranceSpec> levelTolerances;
+  final Map<LearnerLevelKey, SeverityBandTable> levelSeverityMs;
   final bool missingMembersDoNotInvalidate;
   final bool excludesExtraNotes;
 
   SimultaneityPolicySpec({
     super.unavailableHandling = UnavailableHandling.noPenalty,
     required Map<LearnerLevelKey, ToleranceSpec> levelTolerances,
+    required Map<LearnerLevelKey, SeverityBandTable> levelSeverityMs,
     required this.missingMembersDoNotInvalidate,
     required this.excludesExtraNotes,
   }) : levelTolerances = Map<LearnerLevelKey, ToleranceSpec>.unmodifiable(
          levelTolerances,
+       ),
+       levelSeverityMs = Map<LearnerLevelKey, SeverityBandTable>.unmodifiable(
+         levelSeverityMs,
        );
+
+  /// Severity for an observed chord spread in milliseconds at [level].
+  SeverityTier classifySeverity(LearnerLevelKey level, num spreadMs) =>
+      levelSeverityMs[level]!.classify(spreadMs);
+
+  /// Every learner level must carry exactly one severity table.
+  void validateLevelCoverage() {
+    for (final level in LearnerLevelKey.values) {
+      if (!levelSeverityMs.containsKey(level)) {
+        throw FormatException(
+          'SimultaneityPolicySpec: unknown/missing learner-level mapping '
+          '${level.serialName}.',
+        );
+      }
+    }
+  }
 
   @override
   Map<String, Object?> toMap() => <String, Object?>{
     'unavailable_handling': unavailableHandling.serialName,
     'level_tolerances': <String, Object?>{
       for (final entry in levelTolerances.entries)
+        entry.key.serialName: entry.value.toMap(),
+    },
+    'level_severity_ms': <String, Object?>{
+      for (final entry in levelSeverityMs.entries)
         entry.key.serialName: entry.value.toMap(),
     },
     'missing_members_do_not_invalidate': missingMembersDoNotInvalidate,
@@ -542,6 +1446,7 @@ final class SimultaneityPolicySpec extends DimensionPolicySpec {
       other is SimultaneityPolicySpec &&
           other.unavailableHandling == unavailableHandling &&
           _levelToleranceMapEq(other.levelTolerances, levelTolerances) &&
+          _levelSeverityMapEq(other.levelSeverityMs, levelSeverityMs) &&
           other.missingMembersDoNotInvalidate ==
               missingMembersDoNotInvalidate &&
           other.excludesExtraNotes == excludesExtraNotes;
@@ -550,6 +1455,7 @@ final class SimultaneityPolicySpec extends DimensionPolicySpec {
   int get hashCode => Object.hash(
     unavailableHandling,
     _toleranceMapContentHash(levelTolerances),
+    _levelSeverityMapHash(levelSeverityMs),
     missingMembersDoNotInvalidate,
     excludesExtraNotes,
   );
@@ -557,36 +1463,60 @@ final class SimultaneityPolicySpec extends DimensionPolicySpec {
 
 /// Retrieval Latency policy.
 ///
-/// Runtime anchor absence (`NO_RUNTIME_PERFORMANCE_ANCHOR`) is an input-layer
-/// fact; the policy only declares handling. Anchor semantics and thresholds
-/// are UNRESOLVED.
+/// Enabled for every mode but always UNAVAILABLE in the MVP because no frozen
+/// model provides a runtime performance anchor. It produces no severity and no
+/// star impact; no threshold is invented.
 final class RetrievalLatencyPolicySpec extends DimensionPolicySpec {
+  final bool enabledForAllModes;
+  final bool producesSeverity;
+  final bool producesStarImpact;
+  final ErrorVectorReasonCode unavailableReasonCode;
+
   const RetrievalLatencyPolicySpec({
     super.unavailableHandling = UnavailableHandling.noPenalty,
+    required this.enabledForAllModes,
+    required this.producesSeverity,
+    required this.producesStarImpact,
+    required this.unavailableReasonCode,
   });
 
   @override
   Map<String, Object?> toMap() => <String, Object?>{
     'unavailable_handling': unavailableHandling.serialName,
+    'enabled_for_all_modes': enabledForAllModes,
+    'produces_severity': producesSeverity,
+    'produces_star_impact': producesStarImpact,
+    'unavailable_reason_code': unavailableReasonCode.serialName,
   };
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is RetrievalLatencyPolicySpec &&
-          other.unavailableHandling == unavailableHandling;
+          other.unavailableHandling == unavailableHandling &&
+          other.enabledForAllModes == enabledForAllModes &&
+          other.producesSeverity == producesSeverity &&
+          other.producesStarImpact == producesStarImpact &&
+          other.unavailableReasonCode == unavailableReasonCode;
 
   @override
-  int get hashCode => unavailableHandling.hashCode;
+  int get hashCode => Object.hash(
+    unavailableHandling,
+    enabledForAllModes,
+    producesSeverity,
+    producesStarImpact,
+    unavailableReasonCode,
+  );
 }
 
 /// The single mutable-free container of an Evaluation Policy profile: identity,
-/// versioning, provenance, six dimension specs, star-quality policy, and the
-/// NOT_APPLICABLE / resolution handling.
+/// versioning, provenance, six dimension specs, star-quality policy, the star
+/// aggregation rules, the result-state model, the Error Vector policy, the
+/// materialized applicability table, and the NOT_APPLICABLE handling.
 ///
-/// This is DATA, not behavior. No evaluation algorithm lives here. Numeric
-/// thresholds remain unresolved; only values explicitly decided by the product
-/// owner are materialized (each tagged with [ContractSourceProvenance]).
+/// This is DATA, not behavior. No evaluation algorithm lives here. Every value
+/// decided by H2.9G is materialized; a consuming algorithm must read its
+/// thresholds from this profile and must not hard-code grading literals.
 final class EvaluationPolicyProfile {
   static const String profileId = 'mvp_default_v1';
   static const String contractVersion = 'v1.1';
@@ -606,6 +1536,10 @@ final class EvaluationPolicyProfile {
   final RetrievalLatencyPolicySpec retrievalLatency;
 
   final StarQualityPolicy stars;
+  final EvaluabilityPolicy evaluability;
+  final ResultStatePolicy resultState;
+  final ErrorVectorPolicy errorVector;
+  final EvaluationPolicyApplicability applicability;
   final NotApplicableHandling notApplicableHandling;
 
   /// Only [PolicyResolutionLayer.profile] (plus per-mode applicability) is
@@ -616,7 +1550,7 @@ final class EvaluationPolicyProfile {
   static final EvaluationPolicyProfile instance =
       EvaluationPolicyProfile.build();
 
-  EvaluationPolicyProfile._({
+  EvaluationPolicyProfile({
     required this.profileIdValue,
     required this.contractVersionValue,
     required this.policyVersionValue,
@@ -628,6 +1562,10 @@ final class EvaluationPolicyProfile {
     required this.ioi,
     required this.retrievalLatency,
     required this.stars,
+    required this.evaluability,
+    required this.resultState,
+    required this.errorVector,
+    required this.applicability,
     required this.notApplicableHandling,
     required this.appliedResolutionDepth,
     required Set<PolicyResolutionLayer> unresolvedPrecedenceLayers,
@@ -635,10 +1573,10 @@ final class EvaluationPolicyProfile {
          unresolvedPrecedenceLayers,
        );
 
-  /// Deterministically builds the profile from locked constants. No numeric
-  /// threshold is invented here.
+  /// Deterministically builds the materialized `mvp_default_v1` profile from
+  /// the locked H2.9G decisions.
   factory EvaluationPolicyProfile.build() {
-    return EvaluationPolicyProfile._(
+    return EvaluationPolicyProfile(
       profileIdValue: profileId,
       contractVersionValue: contractVersion,
       policyVersionValue: policyVersion,
@@ -647,45 +1585,125 @@ final class EvaluationPolicyProfile {
         sourcePath: 'lib/midi/domain/evaluation_input.dart',
         sourceIdentifier: 'MvpDefaultEvaluationProfile',
       ),
-      pitch: const PitchPolicySpec(),
-      timing: const TimingPolicySpec(
+      pitch: PitchPolicySpec(
+        exactMidiIdentity: true,
+        oneToOneMatching: true,
+        toleranceApplied: false,
+        spellingComparison: false,
+        rematchingAllowed: false,
+        alignmentAuthority: 'H2.6',
+        extraNotesArePitchErrors: false,
+        wrongNoteSeverity: _pitchWrongNoteSeverity,
+      ),
+      timing: TimingPolicySpec(
         firstNoteIsStartReference: true,
+        firstNoteLatenessPenalized: false,
         tightensWithTempo: true,
-        tempoDependencyKind: null,
+        tempoDependencyKind: TimingTempoDependencyKind.normalizedRatio,
         baseTolerance: null,
+        toleranceRatio: const ProportionalTolerance(
+          percent: 5,
+          rounding: ToleranceRoundingMode.nearest,
+        ),
+        severityBands: _timingSeverity,
+        severityReferenceIntervalMs: 500,
       ),
       order: const OrderPolicySpec(
         impactTier: OrderImpactTier.lowerThanPrimaryPitch,
+        adjacentInversionSeverity: SeverityTier.minor,
+        partialInversionSeverity: SeverityTier.moderate,
+        fullReversalSeverity: SeverityTier.major,
+        independentOfPitch: true,
+        rematchingAllowed: false,
       ),
       simultaneity: SimultaneityPolicySpec(
         levelTolerances: <LearnerLevelKey, ToleranceSpec>{
-          // Vocabulary materialized; every level tolerance UNRESOLVED.
+          // Level thresholds are carried by the severity tables below; the
+          // legacy per-level tolerance slot stays unresolved.
           LearnerLevelKey.beginner: ToleranceSpec(),
           LearnerLevelKey.intermediate: ToleranceSpec(),
           LearnerLevelKey.advanced: ToleranceSpec(),
         },
+        levelSeverityMs: _simultaneitySeverity,
         missingMembersDoNotInvalidate: true,
         excludesExtraNotes: true,
       ),
-      ioi: const IoiPolicySpec(tolerance: null),
-      retrievalLatency: const RetrievalLatencyPolicySpec(),
+      ioi: IoiPolicySpec(
+        tolerance: null,
+        severityBands: _ioiSeverity,
+        comparisonBasis: 'learner_mean_interval',
+        doubleChargesTiming: false,
+      ),
+      retrievalLatency: const RetrievalLatencyPolicySpec(
+        enabledForAllModes: true,
+        producesSeverity: false,
+        producesStarImpact: false,
+        unavailableReasonCode:
+            ErrorVectorReasonCode.retrievalLatencyUnavailable,
+      ),
       stars: StarQualityPolicy(
         primarySeverityModel: PrimarySeverityModel.worstErrorWithMinorTrims,
         allowZeroStars: true,
-        minorTrimCount: null,
+        minorTrimCount: 2,
         missingNote: MissingNoteStarPolicy(
           countSensitive: true,
           oneMissingNoteCapStars: 4,
           perAdditionalMissingCapStars: null,
+          capTable: _missingNoteCaps,
+          appliedAfterBaseAndTrims: true,
+          isCeilingNotSeverity: true,
+          invalidatesSimultaneity: false,
         ),
-        extraNote: const ExtraNoteStarPolicy(
+        extraNote: ExtraNoteStarPolicy(
           imposesHardCap: false,
           hardCapStars: null,
+          excludedFromSimultaneity: true,
+          severityByCount: _extraNoteSeverity,
         ),
         lessonStarCapacity: 10,
         accumulation: StarAccumulationKind.cappedProgress,
+        baseStars: const <SeverityTier, int>{
+          SeverityTier.none: 5,
+          SeverityTier.negligible: 5,
+          SeverityTier.minor: 4,
+          SeverityTier.moderate: 3,
+          SeverityTier.major: 2,
+        },
+        minimumTrimSeverity: SeverityTier.minor,
+        worstErrorEstablishesBase: true,
+        worstErrorTrims: false,
+        fractionalStars: false,
+        lessonStarsMonotonic: true,
+        lessonStarsDecay: false,
+        lessonStarsSeparateFromMastery: true,
+        tempoProgressionThresholdStars: 4,
         bands: StarQualityPolicy.standardBands,
       ),
+      evaluability: const EvaluabilityPolicy(
+        requiresStructuralAssociation: true,
+        basedOnPitchCorrectness: false,
+        zeroAssociationsMeansNotEnoughPerformance: true,
+        associationAuthority: 'H2.6',
+      ),
+      resultState: ResultStatePolicy(
+        insufficientDataState: EvaluationResultState.notEnoughPerformance,
+        evaluatedMinStars: 0,
+        evaluatedMaxStars: 5,
+        producesAggregatePassFail: false,
+        notEnoughPerformanceEqualsZeroStars: false,
+        lifecycleStatesOutsideResult: const <String>[
+          'INVALIDATED',
+          'ABANDONED',
+          'FAILED',
+        ],
+      ),
+      errorVector: ErrorVectorPolicy(
+        reasonCodes: ErrorVectorReasonCode.values,
+        descriptiveOnly: true,
+        carriesStarsOrWeights: false,
+        mutatesMasteryEvidence: false,
+      ),
+      applicability: _buildApplicability(),
       notApplicableHandling: NotApplicableHandling.distinct,
       appliedResolutionDepth: PolicyResolutionLayer.profile,
       unresolvedPrecedenceLayers: <PolicyResolutionLayer>{
@@ -695,6 +1713,24 @@ final class EvaluationPolicyProfile {
         PolicyResolutionLayer.tempoRange,
         PolicyResolutionLayer.dimensionOverride,
       },
+    );
+  }
+
+  static EvaluationPolicyApplicability _buildApplicability() {
+    final enabled = <TargetMode, Set<EvaluationDimension>>{};
+    final notApplicable = <TargetMode, Set<EvaluationDimension>>{};
+    for (final mode in TargetMode.values) {
+      final modeEnabled = MvpDefaultEvaluationProfile.instance
+          .enabledDimensions(mode);
+      enabled[mode] = modeEnabled;
+      notApplicable[mode] = <EvaluationDimension>{
+        for (final dimension in EvaluationDimension.values)
+          if (!modeEnabled.contains(dimension)) dimension,
+      };
+    }
+    return EvaluationPolicyApplicability(
+      enabled: enabled,
+      notApplicable: notApplicable,
     );
   }
 
@@ -708,10 +1744,40 @@ final class EvaluationPolicyProfile {
         retrievalLatency,
       ]);
 
+  /// True for the materialized MVP profile: every applicable dimension carries
+  /// executable severity data.
   bool get containsResolvedDimensionThresholds =>
-      timing.baseTolerance?.isResolved == true ||
-      ioi.tolerance?.isResolved == true ||
-      simultaneity.levelTolerances.values.any((spec) => spec.isResolved);
+      timing.severityBands.bands.isNotEmpty &&
+      ioi.severityBands.bands.isNotEmpty &&
+      simultaneity.levelSeverityMs.isNotEmpty;
+
+  /// Deterministically rejects malformed profiles.
+  void validate() {
+    if (profileIdValue != profileId ||
+        contractVersionValue != contractVersion) {
+      throw const FormatException(
+        'EvaluationPolicyProfile: incompatible profile identity or contract '
+        'version.',
+      );
+    }
+    if (dimensionSpecs.length != EvaluationDimension.values.length) {
+      throw const FormatException(
+        'EvaluationPolicyProfile: every evaluation dimension requires a '
+        'policy.',
+      );
+    }
+    pitch.wrongNoteSeverity.validate();
+    timing.severityBands.validate();
+    ioi.severityBands.validate();
+    simultaneity.validateLevelCoverage();
+    for (final table in simultaneity.levelSeverityMs.values) {
+      table.validate();
+    }
+    stars.validate();
+    errorVector.validate();
+    applicability.validate();
+    resultState.validate();
+  }
 
   Map<String, Object?> toMap() => <String, Object?>{
     'profile_id': profileIdValue,
@@ -727,6 +1793,10 @@ final class EvaluationPolicyProfile {
       'retrieval_latency': retrievalLatency.toMap(),
     },
     'stars': stars.toMap(),
+    'evaluability': evaluability.toMap(),
+    'result_state': resultState.toMap(),
+    'error_vector': errorVector.toMap(),
+    'applicability': applicability.toMap(),
     'not_applicable_handling': notApplicableHandling.serialName,
     'applied_resolution_depth': appliedResolutionDepth.serialName,
     'unresolved_precedence_layers':
@@ -751,6 +1821,10 @@ final class EvaluationPolicyProfile {
           other.ioi == ioi &&
           other.retrievalLatency == retrievalLatency &&
           other.stars == stars &&
+          other.evaluability == evaluability &&
+          other.resultState == resultState &&
+          other.errorVector == errorVector &&
+          other.applicability == applicability &&
           other.notApplicableHandling == notApplicableHandling &&
           other.appliedResolutionDepth == appliedResolutionDepth;
 
@@ -767,6 +1841,10 @@ final class EvaluationPolicyProfile {
     ioi,
     retrievalLatency,
     stars,
+    evaluability,
+    resultState,
+    errorVector,
+    applicability,
     notApplicableHandling,
     appliedResolutionDepth,
   );
@@ -993,3 +2071,320 @@ bool _resolvedDimensionListEq(
   }
   return true;
 }
+
+bool _severityBandListEq(List<SeverityBand> a, List<SeverityBand> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _missingNoteCapListEq(List<MissingNoteCap> a, List<MissingNoteCap> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _reasonCodeListEq(
+  List<ErrorVectorReasonCode> a,
+  List<ErrorVectorReasonCode> b,
+) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _stringListEq(List<String> a, List<String> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _severityStarMapEq(Map<SeverityTier, int> a, Map<SeverityTier, int> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (final tier in SeverityTier.values) {
+    if (a[tier] != b[tier]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int _severityStarMapHash(Map<SeverityTier, int> map) {
+  var hash = 0;
+  for (final tier in SeverityTier.values) {
+    hash = Object.hash(hash, tier, map[tier]);
+  }
+  return hash;
+}
+
+bool _levelSeverityMapEq(
+  Map<LearnerLevelKey, SeverityBandTable> a,
+  Map<LearnerLevelKey, SeverityBandTable> b,
+) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (final key in LearnerLevelKey.values) {
+    if (a[key] != b[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int _levelSeverityMapHash(Map<LearnerLevelKey, SeverityBandTable> map) {
+  var hash = 0;
+  for (final key in LearnerLevelKey.values) {
+    hash = Object.hash(hash, key, map[key]);
+  }
+  return hash;
+}
+
+List<String> _dimensionSerials(Set<EvaluationDimension> dimensions) => <String>[
+  for (final dimension in EvaluationDimension.values)
+    if (dimensions.contains(dimension)) _dimensionSerial(dimension),
+];
+
+Map<TargetMode, Set<EvaluationDimension>> _freezeDimensionSets(
+  Map<TargetMode, Set<EvaluationDimension>> source,
+) => Map<TargetMode, Set<EvaluationDimension>>.unmodifiable(
+  <TargetMode, Set<EvaluationDimension>>{
+    for (final mode in TargetMode.values)
+      mode: Set<EvaluationDimension>.unmodifiable(
+        source[mode] ?? const <EvaluationDimension>{},
+      ),
+  },
+);
+
+bool _applicabilityMapEq(
+  Map<TargetMode, Set<EvaluationDimension>> a,
+  Map<TargetMode, Set<EvaluationDimension>> b,
+) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (final mode in TargetMode.values) {
+    final first = a[mode];
+    final second = b[mode];
+    if (first == null || second == null) {
+      if (first != second) {
+        return false;
+      }
+      continue;
+    }
+    if (first.length != second.length || !first.containsAll(second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int _applicabilityMapHash(Map<TargetMode, Set<EvaluationDimension>> map) {
+  var hash = 0;
+  for (final mode in TargetMode.values) {
+    hash = Object.hash(
+      hash,
+      mode,
+      Object.hashAll(_dimensionSerials(map[mode] ?? const {})),
+    );
+  }
+  return hash;
+}
+
+bool _nullableMapEq(Map<String, Object?>? a, Map<String, Object?>? b) {
+  if (identical(a, b)) {
+    return true;
+  }
+  if (a == null || b == null || a.length != b.length) {
+    return false;
+  }
+  for (final entry in a.entries) {
+    if (!b.containsKey(entry.key) || b[entry.key] != entry.value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int _nullableMapHash(Map<String, Object?> map) {
+  final keys = map.keys.toList()..sort();
+  var hash = 0;
+  for (final key in keys) {
+    hash = Object.hash(hash, key, map[key]);
+  }
+  return hash;
+}
+
+// ---- Materialized mvp_default_v1 grading data (H2.9G) ----
+//
+// All numeric grading values live here as data. No consuming algorithm may
+// hard-code these thresholds.
+
+final SeverityBandTable _pitchWrongNoteSeverity = SeverityBandTable(
+  bands: const <SeverityBand>[
+    SeverityBand(
+      severity: SeverityTier.none,
+      upperBound: 0,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.minor,
+      upperBound: 1,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.moderate,
+      upperBound: 2,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(severity: SeverityTier.major),
+  ],
+);
+
+final SeverityBandTable _extraNoteSeverity = SeverityBandTable(
+  bands: const <SeverityBand>[
+    SeverityBand(
+      severity: SeverityTier.none,
+      upperBound: 0,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.negligible,
+      upperBound: 1,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.minor,
+      upperBound: 2,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(severity: SeverityTier.moderate),
+  ],
+);
+
+final SeverityBandTable _timingSeverity = SeverityBandTable(
+  bands: const <SeverityBand>[
+    SeverityBand(
+      severity: SeverityTier.negligible,
+      upperBound: 4,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.minor,
+      upperBound: 8,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.moderate,
+      upperBound: 15,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(severity: SeverityTier.major),
+  ],
+);
+
+final SeverityBandTable _ioiSeverity = SeverityBandTable(
+  bands: const <SeverityBand>[
+    SeverityBand(
+      severity: SeverityTier.negligible,
+      upperBound: 5,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.minor,
+      upperBound: 10,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(
+      severity: SeverityTier.moderate,
+      upperBound: 20,
+      upperBoundary: PolicyBoundary.inclusive,
+    ),
+    SeverityBand(severity: SeverityTier.major),
+  ],
+);
+
+final Map<LearnerLevelKey, SeverityBandTable> _simultaneitySeverity =
+    <LearnerLevelKey, SeverityBandTable>{
+      LearnerLevelKey.beginner: SeverityBandTable(
+        bands: const <SeverityBand>[
+          SeverityBand(
+            severity: SeverityTier.negligible,
+            upperBound: 40,
+            upperBoundary: PolicyBoundary.inclusive,
+          ),
+          SeverityBand(
+            severity: SeverityTier.minor,
+            upperBound: 80,
+            upperBoundary: PolicyBoundary.inclusive,
+          ),
+          SeverityBand(severity: SeverityTier.major),
+        ],
+      ),
+      LearnerLevelKey.intermediate: SeverityBandTable(
+        bands: const <SeverityBand>[
+          SeverityBand(
+            severity: SeverityTier.negligible,
+            upperBound: 30,
+            upperBoundary: PolicyBoundary.inclusive,
+          ),
+          SeverityBand(
+            severity: SeverityTier.minor,
+            upperBound: 60,
+            upperBoundary: PolicyBoundary.inclusive,
+          ),
+          SeverityBand(severity: SeverityTier.major),
+        ],
+      ),
+      LearnerLevelKey.advanced: SeverityBandTable(
+        bands: const <SeverityBand>[
+          SeverityBand(
+            severity: SeverityTier.negligible,
+            upperBound: 20,
+            upperBoundary: PolicyBoundary.inclusive,
+          ),
+          SeverityBand(
+            severity: SeverityTier.minor,
+            upperBound: 40,
+            upperBoundary: PolicyBoundary.inclusive,
+          ),
+          SeverityBand(severity: SeverityTier.major),
+        ],
+      ),
+    };
+
+final MissingNoteCapTable _missingNoteCaps = MissingNoteCapTable(
+  caps: const <MissingNoteCap>[
+    MissingNoteCap(minimumMissingCount: 0, maxStars: null),
+    MissingNoteCap(minimumMissingCount: 1, maxStars: 4),
+    MissingNoteCap(minimumMissingCount: 2, maxStars: 3),
+    MissingNoteCap(minimumMissingCount: 3, maxStars: 2),
+    MissingNoteCap(minimumMissingCount: 4, maxStars: 1),
+  ],
+);
