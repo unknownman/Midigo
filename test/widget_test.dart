@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:miditutor/diagnostics/midi_source_diagnostic_view.dart';
-import 'package:miditutor/main.dart';
 import 'package:miditutor/midi/application/midi_device_connection.dart';
 import 'package:miditutor/midi/application/midi_device_discovery.dart';
 import 'package:miditutor/midi/application/midi_event_stream.dart';
@@ -61,7 +60,12 @@ void main() {
       ];
     });
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('My 25-Key Keyboard'), findsOneWidget);
@@ -102,7 +106,12 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Connect'));
@@ -160,7 +169,12 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Connect'));
@@ -252,7 +266,12 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Connect'));
@@ -312,7 +331,12 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Connect'));
@@ -582,7 +606,12 @@ void main() {
       return null;
     });
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Connect'));
@@ -602,7 +631,12 @@ void main() {
       return <dynamic>[];
     });
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('No MIDI sources detected.'), findsOneWidget);
@@ -618,7 +652,12 @@ void main() {
       );
     });
 
-    await tester.pumpWidget(const MidiTutorApp());
+    await tester.pumpWidget(MaterialApp(
+      home: MidiSourceDiagnosticView(
+        discovery: MacosMidiDeviceDiscovery(),
+        connection: MacosMidiDeviceConnection(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('Failed to list MIDI sources.'), findsOneWidget);
