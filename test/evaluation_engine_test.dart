@@ -1795,4 +1795,321 @@ void main() {
     expect(underBase.stars, 4);
     expect(underStricter.stars, 3);
   });
+
+  // -------------------------------------------------------------------------
+  // H2.9K evaluation-engine conformance audit - additional coverage
+  // -------------------------------------------------------------------------
+
+  test('H2.9K-1 - enabled pitch with UNAVAILABLE data still yields '
+      'NOT_ENOUGH_PERFORMANCE: the structural authority never invents '
+      'associations, for both target modes', () {
+    for (final mode in TargetMode.values) {
+      final result = _run(
+        _input(
+          mode,
+          pitch: PitchEvaluationInput(
+            dimensionState: EvaluationDimensionState.enabled,
+            dataAvailability: DataAvailability.unavailable,
+            observations: [],
+          ),
+        ),
+      );
+      expect(result, isA<NotEnoughPerformanceResult>());
+      expect(result.state, EvaluationResultState.notEnoughPerformance);
+      expect(result.toMap().containsKey('stars'), isFalse);
+      expect(result.errorVector, isEmpty);
+    }
+  });
+
+  test('H2.9K-2 - arpeggio timing scales the same absolute deviation by the '
+      'expected interval from the first prescribed note: proportional, not a '
+      'fixed literal threshold', () {
+    // Note 1 is +21 ms at a 200 ms interval (10.5% -> MODERATE); note 2 is
+    // +21 ms at a 1000 ms interval (2.1% -> NEGLIGIBLE). Identical absolute
+    // deviation, different severity, proving the engine grades through the
+    // policy's proportional bands and anchors on the earliest expected onset.
+    final result = _evaluated(
+      _input(
+        TargetMode.arpeggio,
+        timing: TimingEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          observations: [
+            _timingAssociated(0, 0, 0, 1000),
+            _timingAssociated(1, 200, 1, 1221),
+            _timingAssociated(2, 1000, 2, 2021),
+          ],
+        ),
+      ),
+    );
+    final timing = _dim(result, EvaluationDimension.timing);
+    expect(timing.metrics['anchor_note_index'], 0);
+    expect(timing.metrics['evaluated_note_count'], 3);
+    expect(timing.metrics['reference_interval_ms'], 1000);
+    expect(timing.metrics['reference_tolerance_ms'], 50);
+    expect(timing.severity, SeverityTier.moderate);
+    final late = result.errorVector.singleWhere(
+      (e) => e.reasonCode == ErrorVectorReasonCode.timingLate,
+    );
+    expect(late.severity, SeverityTier.moderate);
+    expect(late.signedDelta, 21);
+    expect(late.count, 2);
+    expect(
+      late.context!['expected_note_indices'],
+      <Object?>[1, 2],
+    );
+  });
+
+  test('H2.9K-3 - Timing perfect while IOI deviates: IOI drives the result '
+      'alone (reverse of H2.9J-27), confirming the dimensions never '
+      'double-charge', () {
+    final result = _evaluated(
+      _input(
+        TargetMode.arpeggio,
+        timing: TimingEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          observations: [
+            _timingAssociated(0, 0, 0, 1000),
+            _timingAssociated(1, 500, 1, 1500),
+            _timingAssociated(2, 1000, 2, 2000),
+          ],
+        ),
+        ioi: IoiEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          expected: [_ioi(0, 1, 500), _ioi(1, 2, 500)],
+          observed: [_ioi(0, 1, 399), _ioi(1, 2, 601)],
+        ),
+      ),
+    );
+    expect(
+      _dim(result, EvaluationDimension.timing).severity,
+      SeverityTier.none,
+    );
+    expect(_dim(result, EvaluationDimension.ioi).severity, SeverityTier.major);
+    expect(
+      result.errorVector.any(
+        (e) => e.reasonCode == ErrorVectorReasonCode.timingLate,
+      ),
+      isFalse,
+    );
+    final ioi = result.errorVector.singleWhere(
+      (e) => e.reasonCode == ErrorVectorReasonCode.ioiInconsistent,
+    );
+    expect(ioi.severity, SeverityTier.major);
+    expect(ioi.signedDelta, 101);
+    // IOI MAJOR is the only source: base 2, no trims.
+    expect(result.stars, 2);
+  });
+
+  test('H2.9K-4 - a perfectly simultaneous chord (span 0) classifies as '
+      'NEGLIGIBLE under the inclusive 0..40 ms beginner band and never trims',
+      () {
+    final result = _evaluated(
+      _input(
+        TargetMode.block,
+        simultaneity: SimultaneityEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          groups: [
+            _group(
+              expectedGroupIndex: 0,
+              expectedMembers: [0, 1],
+              expectedPitches: [60, 64],
+              observedEvents: [0, 1],
+              observedOnsets: [1000, 1000],
+              span: 0,
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(
+      _dim(result, EvaluationDimension.simultaneity).severity,
+      SeverityTier.negligible,
+    );
+    expect(
+      _dim(
+        result,
+        EvaluationDimension.simultaneity,
+      ).metrics['spread_group_count'],
+      1,
+    );
+    expect(result.stars, 5);
+  });
+
+  test('H2.9K-5 - order inversion classes are count-based over the full pair '
+      'set: adjacent MINOR, partial MODERATE, full MAJOR for four notes', () {
+    final adjacent = _evaluated(
+      _input(
+        TargetMode.arpeggio,
+        order: OrderEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          order: OrderObservation(
+            expectedOrder: [
+              _el(0, 60, 0),
+              _el(1, 62, 1),
+              _el(2, 64, 2),
+              _el(3, 67, 3),
+            ],
+            observedOrder: [
+              _el(0, 60, 0),
+              _el(1, 62, 1),
+              _el(2, 64, 2),
+              _el(3, 67, 3),
+            ],
+            associatedPairs: [
+              _pair(0, 60, 0, 1, 60, 1),
+              _pair(1, 62, 1, 0, 62, 0),
+              _pair(2, 64, 2, 2, 64, 2),
+              _pair(3, 67, 3, 3, 67, 3),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(
+      _dim(adjacent, EvaluationDimension.order).severity,
+      SeverityTier.minor,
+    );
+
+    final partial = _evaluated(
+      _input(
+        TargetMode.arpeggio,
+        order: OrderEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          order: OrderObservation(
+            expectedOrder: [
+              _el(0, 60, 0),
+              _el(1, 62, 1),
+              _el(2, 64, 2),
+              _el(3, 67, 3),
+            ],
+            observedOrder: [
+              _el(0, 60, 0),
+              _el(1, 62, 1),
+              _el(2, 64, 2),
+              _el(3, 67, 3),
+            ],
+            associatedPairs: [
+              _pair(0, 60, 0, 2, 60, 2),
+              _pair(1, 62, 1, 0, 62, 0),
+              _pair(2, 64, 2, 1, 64, 1),
+              _pair(3, 67, 3, 3, 67, 3),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(
+      _dim(partial, EvaluationDimension.order).severity,
+      SeverityTier.moderate,
+    );
+
+    final full = _evaluated(
+      _input(
+        TargetMode.arpeggio,
+        order: OrderEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          order: OrderObservation(
+            expectedOrder: [
+              _el(0, 60, 0),
+              _el(1, 62, 1),
+              _el(2, 64, 2),
+              _el(3, 67, 3),
+            ],
+            observedOrder: [
+              _el(0, 60, 0),
+              _el(1, 62, 1),
+              _el(2, 64, 2),
+              _el(3, 67, 3),
+            ],
+            associatedPairs: [
+              _pair(0, 60, 0, 3, 60, 3),
+              _pair(1, 62, 1, 2, 62, 2),
+              _pair(2, 64, 2, 1, 64, 1),
+              _pair(3, 67, 3, 0, 67, 0),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(
+      _dim(full, EvaluationDimension.order).severity,
+      SeverityTier.major,
+    );
+  });
+
+  test('H2.9K-6 - retrieval latency is enabled + UNAVAILABLE for arpeggio too '
+      'and never produces severity, star impact, or a fabricated anchor', () {
+    for (final mode in TargetMode.values) {
+      final result = _evaluated(_input(mode));
+      final retrieval = _dim(result, EvaluationDimension.retrievalLatency);
+      expect(retrieval.state, EvaluationDimensionState.enabled);
+      expect(retrieval.dataAvailability, DataAvailability.unavailable);
+      expect(retrieval.severity, SeverityTier.none);
+      final entry = result.errorVector.singleWhere(
+        (e) =>
+            e.reasonCode == ErrorVectorReasonCode.retrievalLatencyUnavailable,
+      );
+      expect(entry.severity, SeverityTier.none);
+      expect(entry.context!['performance_anchor_absent'], isTrue);
+      expect(result.stars, 5);
+    }
+  });
+
+  test('H2.9K-7 - the missing-note ceiling never raises stars above base: a '
+      'MAJOR base of 2 stays 2 with one missing note, and a base of 4 holds '
+      'under the 4-star cap', () {
+    EvaluatedResult baseWithMissing(int wrongCount, int missingCount) {
+      return _evaluated(
+        _input(
+          TargetMode.block,
+          pitch: PitchEvaluationInput(
+            dimensionState: EvaluationDimensionState.enabled,
+            dataAvailability: DataAvailability.available,
+            observations: [
+              for (var i = 0; i < wrongCount; i++)
+                _associated(i, 60 + i * 4, i, 62 + i * 4),
+              for (var i = 0; i < missingCount; i++)
+                _pitchMissing(wrongCount + i, 60 + (wrongCount + i) * 4),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Three wrong notes => MAJOR base 2; one missing cap is 4, so the ceiling
+    // must not lift the result back up.
+    expect(baseWithMissing(3, 1).stars, 2);
+
+    // One MINOR timing error => base 4; one missing cap is exactly 4, so the
+    // ceiling holds the value it would already have.
+    final held = _evaluated(
+      _input(
+        TargetMode.block,
+        pitch: PitchEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          observations: [
+            _associated(0, 60, 0, 60),
+            _pitchMissing(1, 64),
+          ],
+        ),
+        timing: TimingEvaluationInput(
+          dimensionState: EvaluationDimensionState.enabled,
+          dataAvailability: DataAvailability.available,
+          observations: [
+            _timingAssociated(0, 0, 0, 1000),
+            _timingAssociated(1, 0, 1, 1021),
+          ],
+        ),
+      ),
+    );
+    expect(held.stars, 4);
+  });
 }
