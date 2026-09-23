@@ -5,9 +5,13 @@ import '../../midi/application/midi_device_discovery.dart';
 import '../../midi/application/midi_event_stream.dart';
 import '../../midi/application/raw_midi_export_sink.dart';
 import '../../practice/application/evaluation_flow.dart';
+import '../../practice/application/learning_catalog.dart';
+import '../../practice/application/learning_path_service.dart';
 import '../../practice/application/lesson_progress_service.dart';
 import '../../practice/application/practice_session_controller.dart';
-import '../../practice/application/slice1_catalog.dart';
+import '../../practice/application/target_prompt.dart';
+import '../../practice/domain/learning_lesson.dart';
+import '../../practice/domain/learning_path.dart';
 import '../../practice/domain/practice_clock.dart';
 import 'practice_view.dart';
 import 'result_view.dart';
@@ -18,6 +22,8 @@ enum _Stage { teach, practice, result }
 class LessonScreen extends StatefulWidget {
   const LessonScreen({
     super.key,
+    required this.lesson,
+    required this.catalog,
     required this.discovery,
     required this.connection,
     required this.captureFactory,
@@ -26,6 +32,8 @@ class LessonScreen extends StatefulWidget {
     this.exportSink,
   });
 
+  final LearningLesson lesson;
+  final LearningCatalog catalog;
   final MidiDeviceDiscovery discovery;
   final MidiDeviceConnection connection;
   final MidiEventStream Function() captureFactory;
@@ -44,7 +52,6 @@ class _LessonScreenState extends State<LessonScreen> {
 
   PracticeSessionController get _ensureController {
     if (!_controllerBuilt) {
-      final catalog = const Slice1Catalog();
       _controller = PracticeSessionController(
         discovery: widget.discovery,
         connection: widget.connection,
@@ -52,7 +59,7 @@ class _LessonScreenState extends State<LessonScreen> {
         evaluation: const EvaluationFlowService(),
         progressService: widget.progressService,
         clock: widget.clock,
-        targetProvider: () => catalog.buildCMajorBlockExercise().expectedTarget,
+        targetProvider: () => widget.catalog.buildTarget(widget.lesson),
       );
       _controllerBuilt = true;
     }
@@ -61,7 +68,6 @@ class _LessonScreenState extends State<LessonScreen> {
 
   @override
   void dispose() {
-
     _stage.dispose();
     if (_controllerBuilt) {
       _controller.dispose();
@@ -88,23 +94,54 @@ class _LessonScreenState extends State<LessonScreen> {
     });
   }
 
+  /// Continues: opens the next lesson when it became available, otherwise
+  /// returns to the Learning Path.
   Future<void> _continue() async {
     await _controller.disconnect();
-    if (mounted) {
+    if (!mounted) {
+      return;
+    }
+    final service = LearningPathService(
+      catalog: widget.catalog,
+      progressService: widget.progressService,
+    );
+    final next = (await service.loadPath()).nextLessonAfter(widget.lesson.id);
+    if (!mounted) {
+      return;
+    }
+    if (next != null && next.availability != LessonAvailability.locked) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => LessonScreen(
+            lesson: next.lesson,
+            catalog: widget.catalog,
+            discovery: widget.discovery,
+            connection: widget.connection,
+            captureFactory: widget.captureFactory,
+            progressService: widget.progressService,
+            clock: widget.clock,
+            exportSink: widget.exportSink,
+          ),
+        ),
+      );
+    } else {
       Navigator.of(context).pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final target = widget.catalog.buildTarget(widget.lesson);
     return Scaffold(
-      appBar: AppBar(title: const Text('C Major')),
+      appBar: AppBar(title: Text(widget.lesson.title)),
       body: ValueListenableBuilder<_Stage>(
         valueListenable: _stage,
         builder: (context, stage, _) {
           return switch (stage) {
             _Stage.teach => TeachView(
-                progressService: widget.progressService,
+                lesson: widget.lesson,
+                noteNames: TargetPrompt.noteNames(target),
+                pressInstruction: TargetPrompt.pressInstruction(target),
                 onStartPractice: _startPractice,
               ),
             _Stage.practice => PracticeView(

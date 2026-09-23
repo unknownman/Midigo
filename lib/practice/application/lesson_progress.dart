@@ -1,4 +1,5 @@
 import '../../midi/domain/evaluation_result.dart';
+import '../domain/learning_path.dart';
 
 /// Learner-facing cumulative lesson progress for one musical target.
 ///
@@ -10,9 +11,16 @@ import '../../midi/domain/evaluation_result.dart';
 /// * Stars never decrease.
 /// * Stars never exceed 10.
 /// * 10 stars is lesson progress only - it is NOT mastery.
-class LessonProgress {
+class LessonProgress implements LessonProgressLike {
+  /// Frozen lesson star capacity (cumulative, capped, monotonic; "completed at
+  /// 10"). This is the existing MVP acquisition ceiling and is also the
+  /// Learning Path acquisition/completion condition.
+  static const int starCapacity = 10;
+
   final String targetId;
+  @override
   final int stars;
+  @override
   final int attemptCount;
 
   LessonProgress({
@@ -38,6 +46,10 @@ class LessonProgress {
   /// True when the lesson has been practiced at least once.
   bool get hasBeenPracticed => attemptCount > 0;
 
+  /// True when the lesson reached the MVP "completed at 10" acquisition
+  /// ceiling. Lesson progress only - NOT mastery.
+  bool get isCompleted => stars >= starCapacity;
+
   /// Applies one evaluation outcome to this progress and returns the next
   /// cumulative progress. No grading happens here: the outcome is already a
   /// frozen [EvaluationResult] (the runtime never owns the engine).
@@ -46,7 +58,7 @@ class LessonProgress {
       final accumulated = stars + result.stars;
       return LessonProgress(
         targetId: targetId,
-        stars: accumulated > 10 ? 10 : accumulated,
+        stars: accumulated > starCapacity ? starCapacity : accumulated,
         attemptCount: attemptCount + 1,
       );
     }

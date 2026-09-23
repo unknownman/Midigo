@@ -2,7 +2,7 @@
 
 A macOS piano-learning application, built with Flutter, that captures and processes raw MIDI input from USB keyboards via CoreMIDI.
 
-> **Status**: early platform foundation (H1 CoreMIDI capture layer) complete. Vertical Slice 1 — C Major / right-hand / block practice — is implemented and tested.
+> **Status**: early platform foundation (H1 CoreMIDI capture layer) complete. Vertical Slice 1 — C Major / right-hand / block practice — is implemented and tested. Vertical Slice 2 — a six-lesson Learning Path with deterministic unlocking and per-lesson persisted progress — is implemented and tested.
 
 ## What this builds towards
 
@@ -27,6 +27,7 @@ A macOS piano-learning application, built with Flutter, that captures and proces
 - **H1.2 — Connection + session lifecycle**: connect/disconnect over a method channel; session ids are fresh UUIDs, never reused.
 - **H1.3 — Raw event capture**: MIDI client + input port + source connection, packet → `RawMidiEvent` mapping, live Dart event stream, and an in-memory append-only capture buffer.
 - **Vertical Slice 1 — C Major / RH / Block practice**: practice runtime + attempt lifecycle, deterministic evaluation-pipeline composition, cumulative lesson stars (0–10) persisted locally, and a learner-facing Practice → Result flow.
+- **Vertical Slice 2 — Learning Path**: an ordered six-lesson C Major path (RH block → RH arpeggio → LH block → LH arpeggio → Both-Unison block → Both-Unison arpeggio). Lessons unlock deterministically: a lesson completes at 10/10 stars and only then unlocks the next; zero-star / NEP attempts never complete or unlock. Progress persists per target id through the existing store, and Continue opens the next lesson when available or returns to the path.
 
 Raw events are deliberately uninterpreted: a Note-On with velocity 0 stays a Note-On. No normalization, deduplication, or musical evaluation is performed at the capture layer.
 

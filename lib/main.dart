@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'midi/application/midi_device_connection.dart';
 import 'midi/application/midi_device_discovery.dart';
 import 'midi/application/midi_event_stream.dart';
+import 'practice/application/learning_catalog.dart';
 import 'practice/application/lesson_progress_service.dart';
 import 'practice/application/lesson_progress_store.dart';
 import 'practice/application/json_lesson_progress_store.dart';
@@ -71,6 +72,7 @@ class _MidiTutorAppState extends State<MidiTutorApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
       home: HomeScreen(
+        catalog: const LearningCatalog(),
         discovery: _discovery,
         connection: _connection,
         captureFactory: _captureFactory,

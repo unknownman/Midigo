@@ -5,8 +5,10 @@ import '../../midi/application/midi_device_connection.dart';
 import '../../midi/application/midi_device_discovery.dart';
 import '../../midi/application/midi_event_stream.dart';
 import '../../midi/application/raw_midi_export_sink.dart';
+import '../../practice/application/learning_catalog.dart';
+import '../../practice/application/learning_path_service.dart';
 import '../../practice/application/lesson_progress_service.dart';
-import '../../practice/application/slice1_catalog.dart';
+import '../../practice/domain/learning_path.dart';
 import '../../practice/domain/practice_clock.dart';
 import '../learning_path/learning_path_screen.dart';
 import '../review/review_screen.dart';
@@ -14,6 +16,7 @@ import '../review/review_screen.dart';
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
+    required this.catalog,
     required this.discovery,
     required this.connection,
     required this.captureFactory,
@@ -22,6 +25,7 @@ class HomeScreen extends StatelessWidget {
     this.exportSink,
   });
 
+  final LearningCatalog catalog;
   final MidiDeviceDiscovery discovery;
   final MidiDeviceConnection connection;
   final MidiEventStream Function() captureFactory;
@@ -60,6 +64,7 @@ class HomeScreen extends StatelessWidget {
           Text('Welcome back', style: theme.textTheme.headlineSmall),
           const SizedBox(height: 16),
           _LearningPathCard(
+            catalog: catalog,
             discovery: discovery,
             connection: connection,
             captureFactory: captureFactory,
@@ -90,6 +95,7 @@ class HomeScreen extends StatelessWidget {
 
 class _LearningPathCard extends StatelessWidget {
   const _LearningPathCard({
+    required this.catalog,
     required this.discovery,
     required this.connection,
     required this.captureFactory,
@@ -97,6 +103,7 @@ class _LearningPathCard extends StatelessWidget {
     required this.clock,
   });
 
+  final LearningCatalog catalog;
   final MidiDeviceDiscovery discovery;
   final MidiDeviceConnection connection;
   final MidiEventStream Function() captureFactory;
@@ -106,43 +113,65 @@ class _LearningPathCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder(
-      future: progressService.loadProgress(Slice1Catalog.cMajorTargetId),
+      future: LearningPathService(
+        catalog: catalog,
+        progressService: progressService,
+      ).loadPath(),
       builder: (context, snapshot) {
-        final stars = snapshot.data?.stars ?? 0;
-        return Card(
-          child: ListTile(
-            leading: const Icon(Icons.school),
-            title: const Text('Learning Path'),
-            subtitle: Row(
-              children: [
-                const Text('C Major · '),
-                Text(
-                  '$stars / 10 stars',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                for (var i = 0; i < stars; i++) const Text('★'),
-              ],
+        final path = snapshot.data;
+        final current = path == null ? null : _currentLesson(path);
+        final Card card;
+        if (current == null) {
+          card = Card(
+            child: ListTile(
+              leading: const Icon(Icons.school),
+              title: const Text('Learning Path'),
+              subtitle: const Text('Loading…'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _openPath(context),
             ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => LearningPathScreen(
-                    discovery: discovery,
-                    connection: connection,
-                    captureFactory: captureFactory,
-                    progressService: progressService,
-                    clock: clock,
-                  ),
-                ),
-              );
-            },
-          ),
-        );
+          );
+        } else {
+          card = Card(
+            child: ListTile(
+              leading: const Icon(Icons.school),
+              title: const Text('Learning Path'),
+              subtitle: Text(
+                '${current.lesson.subtitle} · ${current.progress.stars} / 10 stars',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _openPath(context),
+            ),
+          );
+        }
+        return card;
       },
+    );
+  }
+
+  LessonState<dynamic> _currentLesson(LearningPath<dynamic> path) {
+    for (final state in path.lessons) {
+      if (state.availability != LessonAvailability.completed) {
+        return state;
+      }
+    }
+    return path.lessons.first;
+  }
+
+  void _openPath(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LearningPathScreen(
+          catalog: catalog,
+          discovery: discovery,
+          connection: connection,
+          captureFactory: captureFactory,
+          progressService: progressService,
+          clock: clock,
+        ),
+      ),
     );
   }
 }

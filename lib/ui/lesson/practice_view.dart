@@ -130,7 +130,7 @@ class _PracticeViewState extends State<PracticeView> {
         const SizedBox(height: 8),
         Text(snapshot.targetDescription, style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
-        const Text('Play C4, E4, and G4 together.'),
+        Text(snapshot.playInstruction),
         const SizedBox(height: 16),
         if (snapshot.errorMessage != null) ...[
           Text(snapshot.errorMessage!, style: TextStyle(color: theme.colorScheme.error)),

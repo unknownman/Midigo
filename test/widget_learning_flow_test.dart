@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:miditutor/main.dart';
+import 'package:miditutor/midi/domain/evaluation_result.dart';
 import 'package:miditutor/practice/application/in_memory_lesson_progress_store.dart';
 import 'package:miditutor/practice/application/lesson_progress_service.dart';
 import 'package:miditutor/practice/application/slice1_catalog.dart';
@@ -125,5 +126,87 @@ void main() {
         .loadProgress(Slice1Catalog.cMajorTargetId);
     expect(progress.stars, 0);
     expect(progress.attemptCount, 1);
+  });
+
+  testWidgets('learning path shows all six lessons; locked until unlocked',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+
+    for (var i = 1; i <= 6; i++) {
+      expect(find.text('Lesson $i · C Major'), findsOneWidget);
+    }
+    expect(find.text('0 / 10 stars'), findsOneWidget);
+    expect(find.text('Locked'), findsNWidgets(5));
+    expect(find.byIcon(Icons.lock), findsNWidgets(5));
+    expect(find.byIcon(Icons.music_note), findsOneWidget);
+  });
+
+  testWidgets('completing lesson 1 unlocks lesson 2 and Continue opens it',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(app());
+    await LessonProgressService(store: store).recordResult(
+      targetId: Slice1Catalog.cMajorTargetId,
+      result: EvaluatedResult(
+        stars: 5,
+        dimensions: const [],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lesson 1 · C Major'));
+    await tester.pumpAndSettle();
+    await startPractice(tester);
+
+    stream.pushPerfectCMajorBlock();
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Result'), findsOneWidget);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lesson 2 · C Major'), findsOneWidget);
+    expect(find.text('C Major · Right Hand · Played one at a time'),
+        findsOneWidget);
+    expect(find.text('Target notes: C4, E4, G4, C5'), findsOneWidget);
+    expect(
+        find.text('Press C, E, G, and C one at a time on the right side '
+            'of the keyboard.'),
+        findsOneWidget);
+    expect(find.text('Start Practice'), findsOneWidget);
+  });
+
+  testWidgets('Continue on an incomplete lesson returns to the path',
+      (WidgetTester tester) async {
+    await goToLesson(tester);
+    await startPractice(tester);
+
+    stream.pushPerfectCMajorBlock();
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lesson 1 · C Major · Right Hand · Played together'),
+        findsNothing);
+    expect(find.text('Lesson 1 · C Major'), findsOneWidget);
+    expect(find.text('Learning Path'), findsOneWidget);
+    expect(find.byIcon(Icons.lock), findsNWidgets(5));
   });
 }

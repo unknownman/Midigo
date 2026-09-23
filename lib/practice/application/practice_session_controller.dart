@@ -19,7 +19,7 @@ import 'evaluation_flow.dart';
 import 'lesson_progress.dart';
 import 'lesson_progress_service.dart';
 import 'practice_runtime.dart';
-import 'slice1_catalog.dart';
+import 'target_prompt.dart';
 
 /// Cradle-observable snapshot of the learner-facing practice session state.
 ///
@@ -31,6 +31,7 @@ class PracticeSessionSnapshot {
   final String sourceName;
   final String lessonTitle;
   final String targetDescription;
+  final String playInstruction;
   final int currentStars;
   final int lessonStars;
   final int attemptCount;
@@ -43,6 +44,7 @@ class PracticeSessionSnapshot {
     required this.sourceName,
     required this.lessonTitle,
     required this.targetDescription,
+    required this.playInstruction,
     required this.currentStars,
     required this.lessonStars,
     required this.attemptCount,
@@ -56,6 +58,7 @@ class PracticeSessionSnapshot {
         sourceName: '',
         lessonTitle: 'C Major',
         targetDescription: 'Play the C block',
+        playInstruction: 'Play C4, E4, and G4 together.',
         currentStars: 0,
         lessonStars: 0,
         attemptCount: 0,
@@ -63,11 +66,27 @@ class PracticeSessionSnapshot {
         resultMessage: '',
       );
 
+  factory PracticeSessionSnapshot.forTarget(ExpectedMusicalTarget target) {
+    return PracticeSessionSnapshot(
+      isConnected: false,
+      sourceName: '',
+      lessonTitle: '${target.root.label} ${target.quality.label}',
+      targetDescription: 'Play the C ${target.mode.name}',
+      playInstruction: TargetPrompt.playInstruction(target),
+      currentStars: 0,
+      lessonStars: 0,
+      attemptCount: 0,
+      attemptInProgress: false,
+      resultMessage: '',
+    );
+  }
+
   PracticeSessionSnapshot copyWith({
     bool? isConnected,
     String? sourceName,
     String? lessonTitle,
     String? targetDescription,
+    String? playInstruction,
     int? currentStars,
     int? lessonStars,
     int? attemptCount,
@@ -80,6 +99,7 @@ class PracticeSessionSnapshot {
       sourceName: sourceName ?? this.sourceName,
       lessonTitle: lessonTitle ?? this.lessonTitle,
       targetDescription: targetDescription ?? this.targetDescription,
+      playInstruction: playInstruction ?? this.playInstruction,
       currentStars: currentStars ?? this.currentStars,
       lessonStars: lessonStars ?? this.lessonStars,
       attemptCount: attemptCount ?? this.attemptCount,
@@ -109,7 +129,9 @@ class PracticeSessionController {
     required this.clock,
     required this.targetProvider,
   })  : _runtime = PracticeRuntime(clock: clock),
-        _capture = MidiRawEventCapture(captureFactory());
+        _capture = MidiRawEventCapture(captureFactory()),
+        session = ValueNotifier<PracticeSessionSnapshot>(
+            PracticeSessionSnapshot.forTarget(targetProvider()));
 
   final MidiDeviceDiscovery discovery;
   final MidiDeviceConnection connection;
@@ -124,8 +146,7 @@ class PracticeSessionController {
   /// Read-only access for tests; UI must not mutate runtime state directly.
   PracticeRuntime get runtime => _runtime;
 
-  final ValueNotifier<PracticeSessionSnapshot> session =
-      ValueNotifier<PracticeSessionSnapshot>(PracticeSessionSnapshot.initial());
+  final ValueNotifier<PracticeSessionSnapshot> session;
 
   bool _interactionStarted = false;
 
@@ -170,13 +191,13 @@ class PracticeSessionController {
     }
     final target = targetProvider();
     final exercise = ExerciseInstance(
-      id: 'exercise-major-c-rh-block',
+      id: 'exercise-${target.targetId}',
       expectedTarget: target,
     );
 
     if (!_runtime.hasOpenInteraction) {
       _runtime.createInteraction(
-        interactionId: 'pi-major-c-rh-block',
+        interactionId: 'pi-${target.targetId}',
         exercises: <ExerciseInstance>[exercise],
       );
     }
@@ -245,20 +266,23 @@ class PracticeSessionController {
     );
   }
 
-  Future<LessonProgress> _currentProgress() async =>
-      await progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+  Future<LessonProgress> _currentProgress() async {
+    final target = targetProvider();
+    return await progressService.loadProgress(target.targetId);
+  }
 
   Future<void> _refresh({required bool attemptInProgress}) async {
+    final target = targetProvider();
     final progress = await _currentProgress();
     final items = _runtime.currentItems;
     session.value = session.value.copyWith(
       isConnected: session.value.isConnected,
-      targetDescription: _description(items),
+      targetDescription: _description(target, items),
       currentStars: _lastCompletedStars(items),
       lessonStars: progress.stars,
       attemptCount: progress.attemptCount,
       attemptInProgress: attemptInProgress,
-      resultMessage: _lastResultMessage(items),
+      resultMessage: _lastResultMessage(target, items),
     );
   }
 
@@ -292,7 +316,8 @@ class PracticeSessionController {
     return 0;
   }
 
-  static String _lastResultMessage(List<PracticeItem> items) {
+  static String _lastResultMessage(
+      ExpectedMusicalTarget target, List<PracticeItem> items) {
     final result = _latestCompletedResult(items);
     if (result is NotEnoughPerformanceResult) {
       return 'Not enough performance to evaluate.';
@@ -304,13 +329,16 @@ class PracticeSessionController {
       if (result.stars > 0) {
         return 'Good try — keep the notes together.';
       }
-      return 'Keep practicing the C block.';
+      return 'Keep practicing the C ${target.mode.name}.';
     }
     return '';
   }
 
-  static String _description(List<PracticeItem> items) =>
-      _hasOpenAttempt(items) ? 'Play the C block' : 'C block - completed';
+  static String _description(ExpectedMusicalTarget target,
+          List<PracticeItem> items) =>
+      _hasOpenAttempt(items)
+          ? 'Play the C ${target.mode.name}'
+          : 'C ${target.mode.name} - completed';
 
   static String _connectionMessage(MidiConnectionError error) => switch (error) {
         MidiConnectionError.alreadyConnected =>
