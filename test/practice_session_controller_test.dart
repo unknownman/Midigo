@@ -130,6 +130,23 @@ void main() {
     await Future<void>.delayed(Duration.zero);
   }
 
+  Future<void> playStaggeredWithExtras() async {
+    final onRows = <List<int>>[const [60], const [64, 62], const [67, 65], const [69]];
+    final offRows = <List<int>>[[60], [64, 62], [67, 65], [69]];
+    var seq = 0;
+    for (final (i, row) in onRows.indexed) {
+      for (final note in row) {
+        stream._controller.add(_note(seq++, 1000 + i * 50, note));
+      }
+    }
+    for (final (i, row) in offRows.indexed) {
+      for (final note in row) {
+        stream._controller.add(_note(seq++, 1050 + i * 50, note, on: false));
+      }
+    }
+    await Future<void>.delayed(Duration.zero);
+  }
+
   test('lists MIDI sources through discovery', () async {
     final controller = await buildController();
     final sources = await controller.listSources();
@@ -203,6 +220,40 @@ void main() {
     expect(item.attempts, hasLength(2));
     expect(item.attempts.last.state, AttemptState.armed);
     expect(item.attempts.last.id, 'pi-major-c-rh-block-item-0-attempt-2');
+  });
+
+  test('per-attempt stars after 5-star then NEP show NEP, not the earlier 5',
+      () async {
+    await buildController();
+    await connectAndStart();
+    await playPerfectBlock();
+    await controller.endAttempt();
+    expect(controller.session.value.currentStars, 5);
+    expect(controller.session.value.resultMessage, 'Perfect! All notes matched.');
+
+    await controller.retryAttempt();
+    await controller.endAttempt();
+
+    expect(controller.session.value.currentStars, 0);
+    expect(
+      controller.session.value.resultMessage,
+      'Not enough performance to evaluate.',
+    );
+  });
+
+  test('per-attempt stars after 5-star then 0-star show 0', () async {
+    await buildController();
+    await connectAndStart();
+    await playPerfectBlock();
+    await controller.endAttempt();
+    expect(controller.session.value.currentStars, 5);
+
+    await controller.retryAttempt();
+    await playStaggeredWithExtras();
+    await controller.endAttempt();
+
+    expect(controller.session.value.currentStars, 0);
+    expect(controller.session.value.resultMessage, 'Keep practicing the C block.');
   });
 
   test('abandonAttempt mid-attempt leaves the attempt abandoned', () async {

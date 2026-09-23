@@ -272,41 +272,39 @@ class PracticeSessionController {
       attempt.state == AttemptState.active ||
       attempt.state == AttemptState.paused;
 
-  static int _lastCompletedStars(List<PracticeItem> items) {
-    for (final item in items) {
-      for (final attempt in item.attempts) {
+  static EvaluationResult? _latestCompletedResult(List<PracticeItem> items) {
+    for (final item in items.reversed) {
+      for (final attempt in item.attempts.reversed) {
         if (attempt.state == AttemptState.completed &&
             attempt.evaluationResult != null) {
-          final result = attempt.evaluationResult!;
-          if (result is EvaluatedResult) {
-            return result.stars;
-          }
+          return attempt.evaluationResult;
         }
       }
+    }
+    return null;
+  }
+
+  static int _lastCompletedStars(List<PracticeItem> items) {
+    final result = _latestCompletedResult(items);
+    if (result is EvaluatedResult) {
+      return result.stars;
     }
     return 0;
   }
 
   static String _lastResultMessage(List<PracticeItem> items) {
-    for (final item in items.reversed) {
-      for (final attempt in item.attempts.reversed) {
-        if (attempt.state == AttemptState.completed &&
-            attempt.evaluationResult != null) {
-          final result = attempt.evaluationResult!;
-          if (result is NotEnoughPerformanceResult) {
-            return 'Not enough performance to evaluate.';
-          }
-          if (result is EvaluatedResult) {
-            if (result.stars >= 5) {
-              return 'Perfect! All notes matched.';
-            }
-            if (result.stars > 0) {
-              return 'Good try — keep the notes together.';
-            }
-            return 'Keep practicing the C block.';
-          }
-        }
+    final result = _latestCompletedResult(items);
+    if (result is NotEnoughPerformanceResult) {
+      return 'Not enough performance to evaluate.';
+    }
+    if (result is EvaluatedResult) {
+      if (result.stars >= 5) {
+        return 'Perfect! All notes matched.';
       }
+      if (result.stars > 0) {
+        return 'Good try — keep the notes together.';
+      }
+      return 'Keep practicing the C block.';
     }
     return '';
   }
