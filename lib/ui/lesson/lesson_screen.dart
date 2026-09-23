@@ -5,8 +5,10 @@ import '../../midi/application/midi_device_discovery.dart';
 import '../../midi/application/midi_event_stream.dart';
 import '../../midi/application/raw_midi_export_sink.dart';
 import '../../practice/application/evaluation_flow.dart';
+import '../../practice/application/fingering_data.dart';
 import '../../practice/application/learning_catalog.dart';
 import '../../practice/application/learning_path_service.dart';
+import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/lesson_progress_service.dart';
 import '../../practice/application/practice_session_controller.dart';
 import '../../practice/application/target_prompt.dart';
@@ -132,6 +134,10 @@ class _LessonScreenState extends State<LessonScreen> {
   @override
   Widget build(BuildContext context) {
     final target = widget.catalog.buildTarget(widget.lesson);
+    final instruction = LessonInstructionFactory().build(
+      target: target,
+      fingerings: const FingeringCatalog().fingeringsFor(widget.lesson.targetId),
+    );
     return Scaffold(
       appBar: AppBar(title: Text(widget.lesson.title)),
       body: ValueListenableBuilder<_Stage>(
@@ -142,10 +148,12 @@ class _LessonScreenState extends State<LessonScreen> {
                 lesson: widget.lesson,
                 noteNames: TargetPrompt.noteNames(target),
                 pressInstruction: TargetPrompt.pressInstruction(target),
+                instruction: instruction,
                 onStartPractice: _startPractice,
               ),
             _Stage.practice => PracticeView(
                 controller: _ensureController,
+                instruction: instruction,
                 onFinished: _toResult,
               ),
             _Stage.result => ResultView(

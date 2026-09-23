@@ -19,6 +19,20 @@ final class TargetPrompt {
     return '${_pitchClassNames[pitch % 12]}$octave';
   }
 
+  /// "C", "E", "G", ... - the pitch-class letter (with accidental for black
+  /// notes) used on the keyboard visualization's key labels.
+  static String letterName(int pitch) => _pitchClassNames[pitch % 12];
+
+  /// Whether [pitch] is a black (accidental) piano key.
+  static bool isBlack(int pitch) {
+    final pitchClass = pitch % 12;
+    return pitchClass == 1 ||
+        pitchClass == 3 ||
+        pitchClass == 6 ||
+        pitchClass == 8 ||
+        pitchClass == 10;
+  }
+
   /// "C4, E4, G4" / "C4, E4, G4, C5" for the target's expected note list.
   static String noteNames(ExpectedMusicalTarget target) =>
       target.notes.map((note) => pitchName(note.pitch)).join(', ');

@@ -2,16 +2,22 @@ import 'package:flutter/material.dart';
 
 import 'package:miditutor/midi/domain/midi_source_info.dart';
 
+import '../../midi/domain/expected_musical_target.dart';
+import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/practice_session_controller.dart';
+import '../widgets/hand_visual_style.dart';
+import '../widgets/piano_keyboard_view.dart';
 
 class PracticeView extends StatefulWidget {
   const PracticeView({
     super.key,
     required this.controller,
+    required this.instruction,
     required this.onFinished,
   });
 
   final PracticeSessionController controller;
+  final LessonInstruction instruction;
   final VoidCallback onFinished;
 
   @override
@@ -69,6 +75,8 @@ class _PracticeViewState extends State<PracticeView> {
         Text('Practice', style: theme.textTheme.headlineSmall),
         const SizedBox(height: 8),
         Text('Connect your MIDI keyboard to start.', style: theme.textTheme.bodyLarge),
+        const SizedBox(height: 4),
+        _HandLabel(instruction: widget.instruction),
         if (snapshot.errorMessage != null) ...[
           const SizedBox(height: 12),
           Text(
@@ -131,6 +139,10 @@ class _PracticeViewState extends State<PracticeView> {
         Text(snapshot.targetDescription, style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
         Text(snapshot.playInstruction),
+        const SizedBox(height: 8),
+        _HandLabel(instruction: widget.instruction),
+        const SizedBox(height: 12),
+        PianoKeyboardView(instruction: widget.instruction),
         const SizedBox(height: 16),
         if (snapshot.errorMessage != null) ...[
           Text(snapshot.errorMessage!, style: TextStyle(color: theme.colorScheme.error)),
@@ -141,6 +153,44 @@ class _PracticeViewState extends State<PracticeView> {
           label: const Text('Finish Attempt'),
           onPressed: snapshot.attemptInProgress ? _finish : null,
         ),
+      ],
+    );
+  }
+}
+
+class _HandLabel extends StatelessWidget {
+  const _HandLabel({required this.instruction});
+
+  final LessonInstruction instruction;
+
+  @override
+  Widget build(BuildContext context) {
+    final hands = <HandVisualStyle>[
+      if (instruction.hand == TargetHand.right ||
+          instruction.hand == TargetHand.bothUnison)
+        HandVisualStyle.right,
+      if (instruction.hand == TargetHand.left ||
+          instruction.hand == TargetHand.bothUnison)
+        HandVisualStyle.left,
+    ];
+    return Row(
+      children: [
+        for (final hand in hands) ...[
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: hand.color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            hand.label,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(width: 16),
+        ],
       ],
     );
   }
