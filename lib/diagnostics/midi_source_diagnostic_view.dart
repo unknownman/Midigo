@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../midi/application/midi_device_connection.dart';
@@ -88,7 +90,11 @@ class _MidiSourceDiagnosticViewState extends State<MidiSourceDiagnosticView> {
       _errorMessage = null;
     });
     try {
-      await _capture.stop();
+      // Capture teardown is initiated first (H1.3 ordering: stop capture, then
+      // native teardown), but its EventChannel cancellation resolves
+      // asynchronously and independently, so it must not gate the H1.2
+      // disconnect state transition.
+      unawaited(_capture.stop().catchError((Object _) {}));
       await widget.connection.disconnect();
     } on MidiConnectionException catch (e) {
       setState(() => _errorMessage = e.toString());
