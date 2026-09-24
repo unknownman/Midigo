@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:miditutor/midi/application/midi_device_connection.dart';
 import 'package:miditutor/midi/application/midi_device_discovery.dart';
 import 'package:miditutor/midi/application/midi_event_stream.dart';
+import 'package:miditutor/midi/domain/midi_connection_error.dart';
 import 'package:miditutor/midi/domain/midi_connection_session.dart';
 import 'package:miditutor/midi/domain/midi_connection_state.dart';
 import 'package:miditutor/midi/domain/midi_source_info.dart';
@@ -26,8 +27,19 @@ class FakeDiscovery implements MidiDeviceDiscovery {
 }
 
 class FakeConnection implements MidiDeviceConnection {
+  FakeConnection();
+
   MidiConnectionSession? session;
   MidiConnectionState _state = MidiConnectionState.notConnected;
+
+  /// When set, [connect] fails with this error instead of connecting.
+  MidiConnectionException? connectError;
+
+  /// Simulates a shared connection that is already active before Practice opens.
+  void preconnect(MidiConnectionSession activeSession) {
+    session = activeSession;
+    _state = MidiConnectionState.connected;
+  }
 
   @override
   MidiConnectionState get state => _state;
@@ -37,6 +49,16 @@ class FakeConnection implements MidiDeviceConnection {
 
   @override
   Future<MidiConnectionSession> connect(MidiSourceInfo source) async {
+    final error = connectError;
+    if (error != null) {
+      throw error;
+    }
+    if (_state == MidiConnectionState.connected && session != null) {
+      throw const MidiConnectionException(
+        MidiConnectionError.alreadyConnected,
+        'A MIDI source is already connected.',
+      );
+    }
     session = MidiConnectionSession(
       sessionId: 'session-1',
       deviceId: source.id,

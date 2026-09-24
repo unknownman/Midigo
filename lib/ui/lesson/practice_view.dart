@@ -31,6 +31,7 @@ class _PracticeViewState extends State<PracticeView> {
   void initState() {
     super.initState();
     _sources = widget.controller.listSources();
+    widget.controller.resolveSourceName();
   }
 
   void _refresh() {
@@ -40,7 +41,15 @@ class _PracticeViewState extends State<PracticeView> {
   }
 
   Future<void> _connect(MidiSourceInfo source) async {
-    await widget.controller.connect(source);
+    final connected = await widget.controller.connect(source);
+    if (!connected) {
+      // The connection error is already on the snapshot; never start an attempt
+      // on a failed connection, so the real error stays visible.
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
     await widget.controller.startAttempt();
     if (mounted) {
       setState(() {});
@@ -147,6 +156,14 @@ class _PracticeViewState extends State<PracticeView> {
         if (snapshot.errorMessage != null) ...[
           Text(snapshot.errorMessage!, style: TextStyle(color: theme.colorScheme.error)),
           const SizedBox(height: 12),
+        ],
+        if (!snapshot.attemptInProgress) ...[
+          FilledButton.icon(
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('Start Attempt'),
+            onPressed: () => widget.controller.startAttempt(),
+          ),
+          const SizedBox(height: 8),
         ],
         FilledButton.icon(
           icon: const Icon(Icons.check),

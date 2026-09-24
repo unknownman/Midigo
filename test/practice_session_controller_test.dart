@@ -6,6 +6,7 @@ import 'package:miditutor/midi/application/midi_device_connection.dart';
 import 'package:miditutor/midi/application/midi_device_discovery.dart';
 import 'package:miditutor/midi/application/midi_event_stream.dart';
 import 'package:miditutor/midi/domain/expected_musical_target.dart';
+import 'package:miditutor/midi/domain/midi_connection_error.dart';
 import 'package:miditutor/midi/domain/midi_connection_session.dart';
 import 'package:miditutor/midi/domain/midi_connection_state.dart';
 import 'package:miditutor/midi/domain/midi_source_info.dart';
@@ -34,8 +35,17 @@ final class _FakeDiscovery implements MidiDeviceDiscovery {
 }
 
 final class _FakeConnection implements MidiDeviceConnection {
+  _FakeConnection();
+
   MidiConnectionSession? session;
   MidiConnectionState _state = MidiConnectionState.notConnected;
+
+  MidiConnectionException? connectError;
+
+  void preconnect(MidiConnectionSession activeSession) {
+    session = activeSession;
+    _state = MidiConnectionState.connected;
+  }
 
   @override
   MidiConnectionState get state => _state;
@@ -45,6 +55,16 @@ final class _FakeConnection implements MidiDeviceConnection {
 
   @override
   Future<MidiConnectionSession> connect(MidiSourceInfo source) async {
+    final error = connectError;
+    if (error != null) {
+      throw error;
+    }
+    if (_state == MidiConnectionState.connected && session != null) {
+      throw const MidiConnectionException(
+        MidiConnectionError.alreadyConnected,
+        'A MIDI source is already connected.',
+      );
+    }
     session = MidiConnectionSession(
       sessionId: 'session-1',
       deviceId: source.id,
@@ -95,12 +115,13 @@ void main() {
   late _FakeMidiStream stream;
   late PracticeSessionController controller;
 
-  Future<PracticeSessionController> buildController() async {
+  Future<PracticeSessionController> buildController(
+      {_FakeConnection? injectedConnection}) async {
     final clock = _FakeClock(DateTime(2025, 1, 1, 11, 0, 0));
     discovery = _FakeDiscovery(const <MidiSourceInfo>[
       MidiSourceInfo(id: 'dev', name: 'APC Key 25', manufacturer: 'Akai'),
     ]);
-    connection = _FakeConnection();
+    connection = injectedConnection ?? _FakeConnection();
     stream = _FakeMidiStream();
     final store = InMemoryLessonProgressStore();
     controller = PracticeSessionController(
@@ -281,5 +302,107 @@ void main() {
       controller.session.value.sourceName,
       isEmpty,
     );
+  });
+
+  test('Practice adopts an already-active shared connection on creation',
+      () async {
+    final active = _FakeConnection()
+      ..preconnect(const MidiConnectionSession(
+        sessionId: 'S1',
+        deviceId: 'dev',
+        connectionType: 'USB',
+      ));
+    await buildController(injectedConnection: active);
+
+    expect(controller.session.value.isConnected, isTrue);
+    expect(controller.session.value.sessionId, 'S1');
+    expect(controller.session.value.deviceId, 'dev');
+    expect(controller.session.value.connectionType, 'USB');
+  });
+
+  test('adopting an existing connection preserves its session identity',
+      () async {
+    final active = _FakeConnection()
+      ..preconnect(const MidiConnectionSession(
+        sessionId: 'S1',
+        deviceId: 'dev',
+        connectionType: 'USB',
+      ));
+    await buildController(injectedConnection: active);
+    await controller.resolveSourceName();
+
+    expect(controller.session.value.sourceName, 'APC Key 25');
+    expect(controller.session.value.sessionId, 'S1');
+    expect(controller.session.value.deviceId, 'dev');
+    expect(controller.session.value.connectionType, 'USB');
+  });
+
+  test('already-connected same device reconciles instead of failing',
+      () async {
+    final active = _FakeConnection()
+      ..preconnect(const MidiConnectionSession(
+        sessionId: 'S1',
+        deviceId: 'dev',
+        connectionType: 'USB',
+      ));
+    await buildController(injectedConnection: active);
+    expect(controller.session.value.isConnected, isTrue);
+
+    final connected = await controller.connect(discovery.sources.first);
+
+    expect(connected, isTrue);
+    expect(controller.session.value.isConnected, isTrue);
+    expect(controller.session.value.sessionId, 'S1');
+    expect(controller.session.value.deviceId, 'dev');
+    expect(controller.session.value.errorMessage, isNull);
+    expect(connection.currentSession, isNotNull);
+  });
+
+  test('already-connected different device is not silently adopted', () async {
+    final active = _FakeConnection()
+      ..preconnect(const MidiConnectionSession(
+        sessionId: 'S1',
+        deviceId: 'other-dev',
+        connectionType: 'USB',
+      ));
+    await buildController(injectedConnection: active);
+    expect(controller.session.value.isConnected, isTrue);
+    expect(controller.session.value.deviceId, 'other-dev');
+
+    final connected = await controller.connect(discovery.sources.first);
+
+    expect(connected, isFalse);
+    expect(
+      controller.session.value.errorMessage,
+      'A MIDI keyboard is already connected.',
+    );
+    expect(controller.session.value.deviceId, 'other-dev');
+    expect(connection.currentSession!.deviceId, 'other-dev');
+  });
+
+  test('startAttempt after a failed connect keeps the connection error',
+      () async {
+    final failing = _FakeConnection()
+      ..connectError = const MidiConnectionException(
+        MidiConnectionError.connectionFailed,
+        'Could not establish the MIDI connection.',
+      );
+    await buildController(injectedConnection: failing);
+
+    final connected = await controller.connect(discovery.sources.first);
+    expect(connected, isFalse);
+    expect(
+      controller.session.value.errorMessage,
+      'Could not connect to that MIDI keyboard.',
+    );
+
+    await controller.startAttempt();
+
+    expect(
+      controller.session.value.errorMessage,
+      'Could not connect to that MIDI keyboard.',
+    );
+    expect(controller.session.value.attemptInProgress, isFalse);
+    expect(controller.runtime.hasOpenInteraction, isFalse);
   });
 }

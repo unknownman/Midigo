@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:miditutor/main.dart';
 import 'package:miditutor/midi/domain/evaluation_result.dart';
+import 'package:miditutor/midi/domain/midi_connection_error.dart';
+import 'package:miditutor/midi/domain/midi_connection_session.dart';
 import 'package:miditutor/practice/application/in_memory_lesson_progress_store.dart';
 import 'package:miditutor/practice/application/lesson_progress_service.dart';
 import 'package:miditutor/practice/application/slice1_catalog.dart';
@@ -14,8 +16,8 @@ void main() {
   late FakeMidiStream stream;
   late InMemoryLessonProgressStore store;
 
-  Widget app() {
-    connection = FakeConnection();
+  Widget app({FakeConnection? injectedConnection}) {
+    connection = injectedConnection ?? FakeConnection();
     stream = FakeMidiStream();
     store = InMemoryLessonProgressStore();
     return MidiTutorApp(
@@ -208,5 +210,65 @@ void main() {
     expect(find.text('Lesson 1 · C Major'), findsOneWidget);
     expect(find.text('Learning Path'), findsOneWidget);
     expect(find.byIcon(Icons.lock), findsNWidgets(5));
+  });
+
+  testWidgets('opening Practice adopts an already-connected device',
+      (WidgetTester tester) async {
+    final preconnected = FakeConnection()
+      ..preconnect(const MidiConnectionSession(
+        sessionId: 'existing-session',
+        deviceId: 'dev',
+        connectionType: 'USB',
+      ));
+    await tester.pumpWidget(app(injectedConnection: preconnected));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lesson 1 · C Major'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Start Practice'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Practice · APC Key 25'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Connect'), findsNothing);
+    expect(
+      find.widgetWithText(FilledButton, 'Start Attempt'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Start Attempt'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Finish Attempt'), findsOneWidget);
+  });
+
+  testWidgets('a failed connect keeps the real error visible and starts nothing',
+      (WidgetTester tester) async {
+    final failing = FakeConnection()
+      ..connectError = const MidiConnectionException(
+        MidiConnectionError.connectionFailed,
+        'Could not establish the MIDI connection.',
+      );
+    await tester.pumpWidget(app(injectedConnection: failing));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lesson 1 · C Major'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Start Practice'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Could not connect to that MIDI keyboard.'),
+      findsOneWidget,
+    );
+    expect(find.text('Connect a MIDI keyboard first.'), findsNothing);
+    expect(find.text('Practice · APC Key 25'), findsNothing);
+    expect(find.text('Start Attempt'), findsNothing);
   });
 }
