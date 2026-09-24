@@ -11,6 +11,7 @@ import '../../midi/domain/expected_musical_target.dart';
 import '../../midi/domain/midi_connection_error.dart';
 import '../../midi/domain/midi_connection_state.dart';
 import '../../midi/domain/midi_source_info.dart';
+import '../../midi/domain/raw_midi_event.dart';
 import '../domain/attempt.dart';
 import '../domain/exercise_instance.dart';
 import '../domain/practice_clock.dart';
@@ -43,6 +44,14 @@ class PracticeSessionSnapshot {
   final String resultMessage;
   final String? errorMessage;
 
+  /// MIDI pitches currently held down during a live practice attempt.
+  ///
+  /// This is a learner-facing projection only: it is never used for grading and
+  /// never touches the evaluation pipeline. The set is immutable-by-convention:
+  /// every producer wraps it as unmodifiable, so a mutable set never escapes to
+  /// the UI.
+  final Set<int> pressedNotes;
+
   const PracticeSessionSnapshot({
     required this.isConnected,
     required this.sourceName,
@@ -58,6 +67,7 @@ class PracticeSessionSnapshot {
     required this.attemptInProgress,
     required this.resultMessage,
     this.errorMessage,
+    this.pressedNotes = const <int>{},
   });
 
   factory PracticeSessionSnapshot.initial() => const PracticeSessionSnapshot(
@@ -103,6 +113,7 @@ class PracticeSessionSnapshot {
     bool? attemptInProgress,
     String? resultMessage,
     Object? errorMessage = _unset,
+    Set<int>? pressedNotes,
   }) {
     return PracticeSessionSnapshot(
       isConnected: isConnected ?? this.isConnected,
@@ -120,6 +131,9 @@ class PracticeSessionSnapshot {
       resultMessage: resultMessage ?? this.resultMessage,
       errorMessage:
           identical(errorMessage, _unset) ? this.errorMessage : errorMessage as String?,
+      pressedNotes: pressedNotes == null
+          ? this.pressedNotes
+          : Set<int>.unmodifiable(pressedNotes),
     );
   }
 
@@ -142,14 +156,22 @@ class PracticeSessionController {
     required this.clock,
     required this.targetProvider,
   })  : _runtime = PracticeRuntime(clock: clock),
-        _capture = MidiRawEventCapture(captureFactory()),
         session = ValueNotifier<PracticeSessionSnapshot>(
             PracticeSessionSnapshot.forTarget(targetProvider())) {
+    // The MIDI event stream is created exactly once per controller and shared
+    // by both the capture (per-attempt buffering) and the live projection.
+    _events = captureFactory();
+    _capture = MidiRawEventCapture(_events);
     // The shared [MidiDeviceConnection] is the single authoritative source of
     // connection truth. If a session already exists (e.g. established from the
     // MIDI diagnostics screen or a previous lesson), Practice adopts it instead
     // of pretending it is disconnected.
     _reconcileConnection();
+    // One live subscription for the whole controller lifetime (cancelled in
+    // [dispose]): it drives the learner-facing pressed-key projection and never
+    // inherits or filters evaluation capture (the capture keeps its own
+    // listener via [MidiRawEventCapture]).
+    _liveSubscription = _events.events.listen(_handleLiveEvent);
   }
 
   final MidiDeviceDiscovery discovery;
@@ -160,7 +182,16 @@ class PracticeSessionController {
   final ExpectedMusicalTarget Function() targetProvider;
 
   final PracticeRuntime _runtime;
-  final MidiRawEventCapture _capture;
+  late final MidiEventStream _events;
+  late final MidiRawEventCapture _capture;
+
+  /// Live sourced subscription for the pressed-key projection. There is
+  /// exactly one per controller and it is cancelled in [dispose].
+  StreamSubscription<RawMidiEvent>? _liveSubscription;
+
+  /// Currently held-down pitches during an active attempt, projected for the
+  /// UI. Cleared at every attempt boundary and on disconnect.
+  final Set<int> _pressedNotes = <int>{};
 
   /// Read-only access for tests; UI must not mutate runtime state directly.
   PracticeRuntime get runtime => _runtime;
@@ -262,10 +293,61 @@ class PracticeSessionController {
     }
   }
 
+  /// Projects a live raw MIDI note into the learner-facing pressed state.
+  ///
+  /// Session safety: only events whose `sessionId` matches the connection's
+  /// active session are projected; events from older/foreign sessions are
+  /// ignored. Raw event semantics (Slice 2.2, documented decision): `note_on`
+  /// with velocity > 0 is a press, `note_off` is a release, and `note_on` with
+  /// velocity 0 is left as a raw `note_on` - it is NEVER normalized into a
+  /// release, so it neither presses nor releases a note here. The projected set
+  /// is never used for grading.
+  void _handleLiveEvent(RawMidiEvent event) {
+    final snapshot = session.value;
+    final note = event.note;
+    if (!snapshot.isConnected ||
+        !snapshot.attemptInProgress ||
+        note == null ||
+        note < 0 ||
+        note > 127) {
+      return;
+    }
+    final activeSessionId = connection.currentSession?.sessionId;
+    if (activeSessionId == null || event.sessionId != activeSessionId) {
+      return;
+    }
+    final changed = switch (event.messageType) {
+      RawMidiMessageType.noteOn when (event.velocity ?? 0) > 0 =>
+        _pressedNotes.add(note),
+      RawMidiMessageType.noteOn => false,
+      RawMidiMessageType.noteOff => _pressedNotes.remove(note),
+      RawMidiMessageType.other => false,
+    };
+    if (changed) {
+      session.value = session.value.copyWith(
+        pressedNotes: _snapshotPressedNotes,
+      );
+    }
+  }
+
+  /// Immutable-by-convention view of the pressed projection for the snapshot.
+  Set<int> get _snapshotPressedNotes => Set<int>.unmodifiable(_pressedNotes);
+
+  /// Clears the live pressed projection at an attempt boundary or disconnect so
+  /// no stale keys bleed into the next attempt, a Result, or the next lesson.
+  void _resetLiveProjection() {
+    if (_pressedNotes.isEmpty && session.value.pressedNotes.isEmpty) {
+      return;
+    }
+    _pressedNotes.clear();
+    session.value = session.value.copyWith(pressedNotes: const <int>{});
+  }
+
   Future<void> disconnect() async {
     await _capture.stop();
     await connection.disconnect();
     _reconcileConnection();
+    _resetLiveProjection();
   }
 
   /// Starts one attempt: opens the interaction (once) and arms a fresh attempt,
@@ -283,6 +365,8 @@ class PracticeSessionController {
       id: 'exercise-${target.targetId}',
       expectedTarget: target,
     );
+
+    _resetLiveProjection();
 
     if (!_runtime.hasOpenInteraction) {
       _runtime.createInteraction(
@@ -323,6 +407,7 @@ class PracticeSessionController {
       result: flow.result,
     );
     await _refresh(attemptInProgress: false);
+    _resetLiveProjection();
   }
 
   /// Abandons the current attempt and the open interaction.
@@ -338,6 +423,7 @@ class PracticeSessionController {
     _interactionStarted = false;
     await _capture.stop();
     await _refresh(attemptInProgress: false);
+    _resetLiveProjection();
   }
 
   /// Retries: arms a fresh attempt and restarts the capture buffer.
@@ -347,6 +433,7 @@ class PracticeSessionController {
     }
     _runtime.armAttempt(itemId: _firstItemId());
     await _capture.start(connection.currentSession!.sessionId);
+    _resetLiveProjection();
     session.value = session.value.copyWith(
       attemptInProgress: true,
       resultMessage: '',
@@ -446,6 +533,11 @@ class PracticeSessionController {
       };
 
   void dispose() {
+    final live = _liveSubscription;
+    _liveSubscription = null;
+    if (live != null) {
+      unawaited(live.cancel());
+    }
     unawaited(_capture.dispose());
     session.dispose();
   }

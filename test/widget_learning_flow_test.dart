@@ -271,4 +271,67 @@ void main() {
     expect(find.text('Practice · APC Key 25'), findsNothing);
     expect(find.text('Start Attempt'), findsNothing);
   });
+
+  testWidgets('live MIDI presses drive the pressed keys and live status',
+      (WidgetTester tester) async {
+    final preconnected = FakeConnection()
+      ..preconnect(const MidiConnectionSession(
+        sessionId: 'session-1',
+        deviceId: 'dev',
+        connectionType: 'USB',
+      ));
+    await tester.pumpWidget(app(injectedConnection: preconnected));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lesson 1 · C Major'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start Practice'));
+    await tester.pumpAndSettle();
+
+    // Not in an attempt yet: a live press is not projected.
+    stream.pushNoteOn(0, 1000, 60);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pressed-60')), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Start Attempt'));
+    await tester.pumpAndSettle();
+    expect(find.text('Attempt active'), findsOneWidget);
+
+    stream.pushNoteOn(1, 1000, 60);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pressed-60')), findsOneWidget);
+    expect(find.text('Pressed: C4 · 1 / 3 target notes'), findsOneWidget);
+
+    stream.pushNoteOn(2, 1000, 64);
+    stream.pushNoteOn(3, 1000, 67);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pressed-64')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pressed-67')), findsOneWidget);
+    expect(
+      find.text('Pressed: C4, E4, G4 · 3 / 3 target notes'),
+      findsOneWidget,
+    );
+
+    // A wrong key inside the visible range shows only the neutral pressed
+    // wash - never an Incorrect/Wrong/Error marker.
+    stream.pushNoteOn(4, 1000, 62);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pressed-62')), findsOneWidget);
+    expect(
+      find.text('Pressed: C4, D4, E4, G4 · 4 / 3 target notes'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Incorrect'), findsNothing);
+    expect(find.textContaining('Wrong'), findsNothing);
+    expect(find.textContaining('Error'), findsNothing);
+
+    stream.pushNoteOff(5, 1060, 60);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pressed-60')), findsNothing);
+    expect(
+      find.text('Pressed: D4, E4, G4 · 3 / 3 target notes'),
+      findsOneWidget,
+    );
+  });
 }

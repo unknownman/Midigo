@@ -82,8 +82,23 @@ final class _FakeConnection implements MidiDeviceConnection {
 }
 
 final class _FakeMidiStream implements MidiEventStream {
-  final StreamController<RawMidiEvent> _controller =
-      StreamController<RawMidiEvent>.broadcast();
+  _FakeMidiStream() {
+    _controller = StreamController<RawMidiEvent>.broadcast(
+      onListen: () {
+        _listenerCount += 1;
+      },
+      onCancel: () {
+        _listenerCount -= 1;
+      },
+    );
+  }
+
+  late final StreamController<RawMidiEvent> _controller;
+
+  /// Number of active stream listeners (live projection + capture).
+  int _listenerCount = 0;
+  int get listenerCount => _listenerCount;
+
   @override
   Stream<RawMidiEvent> get events => _controller.stream;
 }
@@ -99,6 +114,22 @@ RawMidiEvent _note(int seq, int ts, int note, {bool on = true}) => RawMidiEvent(
       note: note,
       velocity: on ? 90 : 0,
       rawBytes: <int>[on ? 0x90 : 0x80, note, on ? 90 : 0],
+    );
+
+/// A raw `note_on` that carries velocity 0 (the key makes no sound). Slice 2.2
+/// deliberately does NOT normalize this into a `note_off`: the event stays a
+/// raw `note_on`, so it neither presses nor releases the projected note.
+RawMidiEvent _noteOnZeroVelocity(int seq, int ts, int note) => RawMidiEvent(
+      sessionId: 'session-1',
+      deviceId: 'dev',
+      connectionType: 'USB',
+      seq: seq,
+      appMonotonicTsMs: ts,
+      messageType: RawMidiMessageType.noteOn,
+      channel: 0,
+      note: note,
+      velocity: 0,
+      rawBytes: <int>[0x90, note, 0],
     );
 
 void main() {
@@ -404,5 +435,183 @@ void main() {
     );
     expect(controller.session.value.attemptInProgress, isFalse);
     expect(controller.runtime.hasOpenInteraction, isFalse);
+  });
+
+  group('Slice 2.2 - live pressed projection', () {
+    test('note_on during an active attempt projects the pressed pitch',
+        () async {
+      await buildController();
+      await connectAndStart();
+      expect(controller.session.value.pressedNotes, isEmpty);
+
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+    });
+
+    test('note_off removes the pressed pitch', () async {
+      await buildController();
+      await connectAndStart();
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+
+      stream._controller.add(_note(1, 1050, 60, on: false));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+    });
+
+    test('multiple simultaneous notes project an order-independent set',
+        () async {
+      await buildController();
+      await connectAndStart();
+      for (final (i, note) in const <int>[60, 64, 67].indexed) {
+        stream._controller.add(_note(i, 1000, note));
+      }
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.session.value.pressedNotes, <int>{60, 64, 67});
+      // The projected set is immutable: a mutable set never escapes to the UI.
+      expect(
+        () => controller.session.value.pressedNotes.add(75),
+        throwsUnsupportedError,
+      );
+    });
+
+    test('releasing one of several pressed notes keeps the rest', () async {
+      await buildController();
+      await connectAndStart();
+      for (final (i, note) in const <int>[60, 64, 67].indexed) {
+        stream._controller.add(_note(i, 1000, note));
+      }
+      stream._controller.add(_note(3, 1050, 60, on: false));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.session.value.pressedNotes, <int>{64, 67});
+    });
+
+    test('note_on with velocity 0 stays raw and neither presses nor releases',
+        () async {
+      await buildController();
+      await connectAndStart();
+      // A held note is not released by a velocity-0 note_on...
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+
+      final rawEvent = _noteOnZeroVelocity(1, 1060, 60);
+      stream._controller.add(rawEvent);
+      stream._controller.add(_noteOnZeroVelocity(2, 1060, 62));
+      await Future<void>.delayed(Duration.zero);
+
+      // ...the raw event itself is unchanged (no normalization to note_off)...
+      expect(rawEvent.messageType, RawMidiMessageType.noteOn);
+      expect(rawEvent.velocity, 0);
+      expect(rawEvent.note, 60);
+      // ...and the projection is untouched: 60 stays held, 62 is not pressed.
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+      expect(controller.session.value.pressedNotes.contains(62), isFalse);
+    });
+
+    test('notes pressed before an attempt starts are not projected',
+        () async {
+      await buildController();
+      await controller.connect(discovery.sources.first);
+
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+      expect(controller.session.value.attemptInProgress, isFalse);
+    });
+
+    test('startAttempt clears any stale pressed projection at the boundary',
+        () async {
+      await buildController();
+      await connectAndStart();
+      stream._controller.add(_note(0, 1000, 60));
+      stream._controller.add(_note(1, 1000, 64));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, <int>{60, 64});
+
+      await controller.startAttempt();
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+      expect(controller.session.value.attemptInProgress, isTrue);
+      final item = controller.runtime.currentInteraction!.items.first;
+      expect(item.attempts, hasLength(2));
+    });
+
+    test('endAttempt clears the pressed projection before the result',
+        () async {
+      await buildController();
+      await connectAndStart();
+      stream._controller.add(_note(0, 1000, 60));
+      stream._controller.add(_note(1, 1000, 64));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, isNotEmpty);
+
+      await controller.endAttempt();
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+      expect(controller.session.value.attemptInProgress, isFalse);
+      expect(controller.session.value.resultMessage, isNotEmpty);
+    });
+
+    test('events from a foreign or old session are ignored', () async {
+      await buildController();
+      await connectAndStart();
+
+      // A late event stamped with a previous/session-foreign id is dropped.
+      stream._controller.add(RawMidiEvent(
+        sessionId: 'old-session-0',
+        deviceId: 'dev',
+        connectionType: 'USB',
+        seq: 0,
+        appMonotonicTsMs: 1000,
+        messageType: RawMidiMessageType.noteOn,
+        channel: 0,
+        note: 60,
+        velocity: 90,
+        rawBytes: <int>[0x90, 60, 90],
+      ));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+    });
+
+    test('dispose cancels the live MIDI subscription', () async {
+      await buildController();
+      // One listener (the live projection); the capture is idle until start.
+      expect(stream.listenerCount, 1);
+
+      controller.dispose();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(stream.listenerCount, 0);
+    });
+
+    test('live projection leaves the evaluation capture intact (5 stars)',
+        () async {
+      await buildController();
+      await connectAndStart();
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+
+      await playPerfectBlock();
+      await controller.endAttempt();
+
+      // The capture buffer still received every event - the 5-star block
+      // evaluated exactly as before the live projection was added.
+      expect(controller.session.value.currentStars, 5);
+      expect(controller.session.value.pressedNotes, isEmpty);
+      expect(
+        controller.session.value.resultMessage,
+        'Perfect! All notes matched.',
+      );
+    });
   });
 }

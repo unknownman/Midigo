@@ -34,6 +34,7 @@ Future<void> _pump(
   WidgetTester tester,
   LessonInstruction instruction, {
   double width = 700,
+  Set<int> pressedNotes = const <int>{},
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -41,7 +42,10 @@ Future<void> _pump(
         body: Center(
           child: SizedBox(
             width: width,
-            child: PianoKeyboardView(instruction: instruction),
+            child: PianoKeyboardView(
+              instruction: instruction,
+              pressedNotes: pressedNotes,
+            ),
           ),
         ),
       ),
@@ -184,6 +188,84 @@ void main() {
           _instruction(hand: TargetHand.bothUnison, mode: TargetMode.arpeggio));
       expect(find.text('Right Hand'), findsOneWidget);
       expect(find.text('Left Hand'), findsOneWidget);
+    });
+  });
+
+  group('PianoKeyboardView - live pressed projection', () {
+    testWidgets('no pressed markers when nothing is held down', (tester) async {
+      await _pump(tester, _instruction(hand: TargetHand.right, mode: TargetMode.block));
+      for (final pitch in <int>[60, 62, 64, 67]) {
+        expect(find.byKey(ValueKey<String>('pressed-$pitch')), findsNothing);
+      }
+    });
+
+    testWidgets('a pressed target key renders a neutral wash over the hand color',
+        (tester) async {
+      await _pump(
+        tester,
+        _instruction(hand: TargetHand.right, mode: TargetMode.block),
+        pressedNotes: const <int>{60},
+      );
+      final key = find.byKey(const ValueKey<String>('key-60'));
+      expect(
+        find.descendant(
+          of: key,
+          matching: find.byKey(const ValueKey<String>('pressed-60')),
+        ),
+        findsOneWidget,
+      );
+      // The hand color and finger number stay visible underneath.
+      final box = tester.widget<ColoredBox>(find.descendant(
+        of: key,
+        matching: find.byType(ColoredBox),
+      ));
+      expect(box.color, HandVisualStyle.right.color);
+      expect(
+        find.descendant(
+          of: key,
+          matching: find.text('1'),
+        ),
+        findsOneWidget,
+      );
+      // Neighbouring keys are untouched.
+      expect(find.byKey(const ValueKey<String>('pressed-64')), findsNothing);
+    });
+
+    testWidgets('a pressed non-target key shows only the wash - no correctness color',
+        (tester) async {
+      await _pump(
+        tester,
+        _instruction(hand: TargetHand.right, mode: TargetMode.block),
+        pressedNotes: const <int>{62},
+      );
+      expect(
+        find.byKey(const ValueKey<String>('pressed-62')),
+        findsOneWidget,
+      );
+      // The wrong key keeps its plain white body - it is never painted as
+      // correct/incorrect.
+      expect(_containerColor(tester, 'key-62'), Colors.white);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('key-62')),
+          matching: find.byType(ColoredBox),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a pressed black key carries the same neutral marker',
+        (tester) async {
+      await _pump(
+        tester,
+        _instruction(hand: TargetHand.right, mode: TargetMode.arpeggio),
+        pressedNotes: const <int>{61},
+      );
+      expect(find.byKey(const ValueKey<String>('black-61')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey<String>('pressed-61')),
+        findsOneWidget,
+      );
     });
   });
 }

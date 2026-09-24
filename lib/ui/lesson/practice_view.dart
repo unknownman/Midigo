@@ -5,6 +5,7 @@ import 'package:miditutor/midi/domain/midi_source_info.dart';
 import '../../midi/domain/expected_musical_target.dart';
 import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/practice_session_controller.dart';
+import '../../practice/application/target_prompt.dart';
 import '../widgets/hand_visual_style.dart';
 import '../widgets/piano_keyboard_view.dart';
 
@@ -74,6 +75,16 @@ class _PracticeViewState extends State<PracticeView> {
         return _buildPracticePanel(context, snapshot);
       },
     );
+  }
+
+  String _liveStatus(PracticeSessionSnapshot snapshot) {
+    final pressed = snapshot.pressedNotes.toList()..sort();
+    if (pressed.isEmpty) {
+      return 'Attempt active';
+    }
+    final names = pressed.map(TargetPrompt.pitchName).join(', ');
+    return 'Pressed: $names · ${pressed.length} / '
+        '${widget.instruction.keys.length} target notes';
   }
 
   Widget _buildConnectionPanel(BuildContext context, PracticeSessionSnapshot snapshot) {
@@ -151,7 +162,19 @@ class _PracticeViewState extends State<PracticeView> {
         const SizedBox(height: 8),
         _HandLabel(instruction: widget.instruction),
         const SizedBox(height: 12),
-        PianoKeyboardView(instruction: widget.instruction),
+        PianoKeyboardView(
+          instruction: widget.instruction,
+          pressedNotes: snapshot.pressedNotes,
+        ),
+        if (snapshot.attemptInProgress) ...[
+          const SizedBox(height: 8),
+          Text(
+            _liveStatus(snapshot),
+            key: const ValueKey('live-status'),
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ],
         const SizedBox(height: 16),
         if (snapshot.errorMessage != null) ...[
           Text(snapshot.errorMessage!, style: TextStyle(color: theme.colorScheme.error)),
