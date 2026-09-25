@@ -62,16 +62,35 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
       await Future<void>.delayed(Duration.zero);
     });
     await tester.pumpAndSettle();
 
     expect(find.text('Result'), findsOneWidget);
-    expect(find.text('Attempt 1 · Lesson progress: 5 / 10 stars'), findsOneWidget);
     expect(find.text('Perfect! All notes matched.'), findsOneWidget);
+    expect(find.text('5 / 10 stars'), findsOneWidget);
+    // The attempt's own stars come from the actual EvaluatedResult.
     expect(
-      find.byIcon(Icons.star_rounded),
+      find.descendant(
+        of: find.byKey(const ValueKey('attempt-stars')),
+        matching: find.byIcon(Icons.star_rounded),
+      ),
+      findsNWidgets(5),
+    );
+    // Lesson progress is rendered separately: 5 of 10 filled so far.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('lesson-progress')),
+        matching: find.byIcon(Icons.star_rounded),
+      ),
+      findsNWidgets(5),
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('lesson-progress')),
+        matching: find.byIcon(Icons.star_outline_rounded),
+      ),
       findsNWidgets(5),
     );
   });
@@ -84,7 +103,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
       await Future<void>.delayed(Duration.zero);
     });
     await tester.pumpAndSettle();
@@ -97,13 +116,20 @@ void main() {
     stream.pushPerfectCMajorBlock();
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
       await Future<void>.delayed(Duration.zero);
     });
     await tester.pumpAndSettle();
 
     expect(find.text('Result'), findsOneWidget);
-    expect(find.text('Attempt 2 · Lesson progress: 10 / 10 stars'), findsOneWidget);
+    expect(find.text('10 / 10 stars'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('lesson-progress')),
+        matching: find.byIcon(Icons.star_rounded),
+      ),
+      findsNWidgets(10),
+    );
   });
 
   testWidgets('empty performance shows not enough performance message',
@@ -112,17 +138,24 @@ void main() {
     await startPractice(tester);
 
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
       await Future<void>.delayed(Duration.zero);
     });
     await tester.pumpAndSettle();
 
     expect(find.text('Result'), findsOneWidget);
     expect(find.text('Not enough performance to evaluate.'), findsOneWidget);
-    expect(find.text('Attempt 1 · Lesson progress: 0 / 10 stars'), findsOneWidget);
+    expect(find.byKey(const ValueKey('nep-message')), findsOneWidget);
+    // NEP is a distinct state: no attempt-star row at all, so the empty
+    // "0/5" does not read like a zero-star evaluation.
+    expect(find.byKey(const ValueKey('attempt-stars')), findsNothing);
+    expect(find.text('0 / 10 stars'), findsOneWidget);
     expect(
-      find.byIcon(Icons.star_outline_rounded),
-      findsNWidgets(5),
+      find.descendant(
+        of: find.byKey(const ValueKey('lesson-progress')),
+        matching: find.byIcon(Icons.star_outline_rounded),
+      ),
+      findsNWidgets(10),
     );
     final progress = await LessonProgressService(store: store)
         .loadProgress(Slice1Catalog.cMajorTargetId);
@@ -166,7 +199,7 @@ void main() {
     stream.pushPerfectCMajorBlock();
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
       await Future<void>.delayed(Duration.zero);
     });
     await tester.pumpAndSettle();
@@ -197,7 +230,7 @@ void main() {
     stream.pushPerfectCMajorBlock();
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Finish Attempt'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
       await Future<void>.delayed(Duration.zero);
     });
     await tester.pumpAndSettle();
@@ -240,7 +273,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Start Attempt'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Finish Attempt'), findsOneWidget);
+    expect(find.text('Finish Practice'), findsOneWidget);
   });
 
   testWidgets('a failed connect keeps the real error visible and starts nothing',
@@ -333,5 +366,97 @@ void main() {
       find.text('Pressed: D4, E4, G4 · 3 / 3 target notes'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a zero-star evaluated attempt renders zero attempt stars without '
+      'the NEP message', (WidgetTester tester) async {
+    await goToLesson(tester);
+    await startPractice(tester);
+
+    stream.pushMessyCMajorBlock();
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.text('Result'), findsOneWidget);
+    expect(find.text('Keep practicing the C block.'), findsOneWidget);
+    // A 0-star EvaluatedResult is NOT the NEP state: attempt-stars exist.
+    expect(find.byKey(const ValueKey('nep-message')), findsNothing);
+    expect(find.byIcon(Icons.music_off), findsNothing);
+    expect(find.byKey(const ValueKey('attempt-stars')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('attempt-stars')),
+        matching: find.byIcon(Icons.star_rounded),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('attempt-stars')),
+        matching: find.byIcon(Icons.star_outline_rounded),
+      ),
+      findsNWidgets(5),
+    );
+    expect(find.text('0 / 10 stars'), findsOneWidget);
+  });
+
+  testWidgets('Continue after NOT_ENOUGH_PERFORMANCE leaves the next lesson '
+      'locked', (WidgetTester tester) async {
+    await goToLesson(tester);
+    await startPractice(tester);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('nep-message')), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Learning Path'), findsOneWidget);
+    expect(find.byIcon(Icons.lock), findsNWidgets(5));
+    expect(find.text('Locked'), findsNWidgets(5));
+  });
+
+  testWidgets('double tapping Finish completes the practice exactly once',
+      (WidgetTester tester) async {
+    await goToLesson(tester);
+    await startPractice(tester);
+    stream.pushPerfectCMajorBlock();
+    await tester.pumpAndSettle();
+
+    await tester.runAsync(() async {
+      // Two rapid presses on the same still-mounted button: the second lands
+      // before the first completion can rebuild/leave the tree. Exactly one
+      // completion must be honored.
+      final center = tester.getCenter(
+        find.widgetWithText(FilledButton, 'Finish Practice'),
+      );
+      final press1 = await tester.startGesture(center);
+      final press2 = await tester.startGesture(center);
+      await press1.up();
+      await press2.up();
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.text('Result'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('attempt-stars')),
+        matching: find.byIcon(Icons.star_rounded),
+      ),
+      findsNWidgets(5),
+    );
+    final progress = await LessonProgressService(store: store)
+        .loadProgress(Slice1Catalog.cMajorTargetId);
+    expect(progress.attemptCount, 1);
+    expect(progress.stars, 5);
   });
 }

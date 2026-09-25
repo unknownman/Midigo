@@ -120,6 +120,28 @@ class FakeMidiStream implements MidiEventStream {
     pushNoteOff(4, 1060, 64);
     pushNoteOff(5, 1060, 67);
   }
+
+  /// A visually messy but definite performance: one real target note plus
+  /// off-by-one neighbours and a late extra - evaluated as 0 stars, not NEP.
+  void pushMessyCMajorBlock() {
+    var seq = 6;
+    final onRows = <List<int>>[
+      const <int>[60],
+      const <int>[64, 62],
+      const <int>[67, 65],
+      const <int>[69],
+    ];
+    for (final (i, row) in onRows.indexed) {
+      for (final note in row) {
+        pushNoteOn(seq++, 1000 + i * 50, note);
+      }
+    }
+    for (final (i, row) in onRows.indexed) {
+      for (final note in row) {
+        pushNoteOff(seq++, 1050 + i * 50, note);
+      }
+    }
+  }
 }
 
 class FakeClock implements PracticeClock {

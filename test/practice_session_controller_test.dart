@@ -6,6 +6,7 @@ import 'package:miditutor/midi/application/midi_device_connection.dart';
 import 'package:miditutor/midi/application/midi_device_discovery.dart';
 import 'package:miditutor/midi/application/midi_event_stream.dart';
 import 'package:miditutor/midi/domain/expected_musical_target.dart';
+import 'package:miditutor/midi/domain/evaluation_result.dart';
 import 'package:miditutor/midi/domain/midi_connection_error.dart';
 import 'package:miditutor/midi/domain/midi_connection_session.dart';
 import 'package:miditutor/midi/domain/midi_connection_state.dart';
@@ -612,6 +613,198 @@ void main() {
         controller.session.value.resultMessage,
         'Perfect! All notes matched.',
       );
+    });
+  });
+
+  group('Slice 2.3 - practice completion & result', () {
+    test('finish exposes the authoritative result and stops capture',
+        () async {
+      await buildController();
+      await connectAndStart();
+      expect(controller.isCapturing, isTrue);
+      await playPerfectBlock();
+
+      await controller.endAttempt();
+
+      expect(controller.isCapturing, isFalse);
+      final result = controller.session.value.latestCompletedResult;
+      expect(result, isA<EvaluatedResult>());
+      expect((result! as EvaluatedResult).stars, 5);
+      // Exactly one source of truth: the snapshot re-exposes the same instance
+      // stored on the completed attempt - it is never re-derived.
+      expect(
+        result,
+        same(
+          controller.runtime.currentInteraction!.items.first.attempts.last
+              .evaluationResult,
+        ),
+      );
+    });
+
+    test('events arriving after finish cannot contaminate a completed attempt',
+        () async {
+      await buildController();
+      await connectAndStart();
+      await playPerfectBlock();
+      await controller.endAttempt();
+
+      final first = controller.runtime.currentInteraction!.items.first
+          .attempts.last.evaluationResult! as EvaluatedResult;
+      expect(first.stars, 5);
+
+      // Late notes pushed after the completion boundary (capture is stopped).
+      for (final (i, note) in const <int>[60, 64, 67].indexed) {
+        stream._controller.add(_note(i, 1200, note));
+      }
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        controller.runtime.currentInteraction!.items.first.attempts.last
+            .evaluationResult,
+        same(first),
+      );
+      expect(controller.session.value.latestCompletedResult, same(first));
+    });
+
+    test('a finished attempt cannot be completed twice (sequential)', () async {
+      await buildController();
+      await connectAndStart();
+      await playPerfectBlock();
+      await controller.endAttempt();
+
+      await controller.endAttempt();
+
+      final item = controller.runtime.currentInteraction!.items.first;
+      expect(item.attempts, hasLength(1));
+      expect(item.attempts.last.state, AttemptState.completed);
+      final progress =
+          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+      expect(progress.attemptCount, 1);
+    });
+
+    test('concurrent double finish completes exactly once', () async {
+      await buildController();
+      await connectAndStart();
+      await playPerfectBlock();
+
+      await Future.wait(
+        <Future<void>>[controller.endAttempt(), controller.endAttempt()],
+      );
+
+      final item = controller.runtime.currentInteraction!.items.first;
+      expect(item.attempts, hasLength(1));
+      final progress =
+          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+      expect(progress.attemptCount, 1);
+      expect(controller.session.value.latestCompletedResult, isA<EvaluatedResult>());
+    });
+
+    test('latest completed result after 5-star then NEP is the NEP result',
+        () async {
+      await buildController();
+      await connectAndStart();
+      await playPerfectBlock();
+      await controller.endAttempt();
+      expect(controller.session.value.latestCompletedResult, isA<EvaluatedResult>());
+
+      await controller.retryAttempt();
+      await controller.endAttempt();
+
+      final attempts = controller.runtime.currentInteraction!.items.first.attempts;
+      expect(attempts.first.evaluationResult, isA<EvaluatedResult>());
+      expect(
+        (attempts.first.evaluationResult! as EvaluatedResult).stars,
+        5,
+      );
+      expect(attempts.last.evaluationResult, isA<NotEnoughPerformanceResult>());
+      expect(
+        controller.session.value.latestCompletedResult,
+        isA<NotEnoughPerformanceResult>(),
+      );
+      expect(controller.session.value.currentStars, 0);
+    });
+
+    test('latest completed result after a messy block is a 0-star evaluated '
+        'result, not NEP', () async {
+      await buildController();
+      await connectAndStart();
+      await playStaggeredWithExtras();
+      await controller.endAttempt();
+
+      final result = controller.session.value.latestCompletedResult;
+      expect(result, isA<EvaluatedResult>());
+      expect((result! as EvaluatedResult).stars, 0);
+      expect(controller.session.value.resultMessage, 'Keep practicing the C block.');
+    });
+
+    test('NEP records progress without adding lesson stars', () async {
+      await buildController();
+      await connectAndStart();
+
+      await controller.endAttempt();
+
+      expect(
+        controller.session.value.latestCompletedResult,
+        isA<NotEnoughPerformanceResult>(),
+      );
+      final progress =
+          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+      expect(progress.stars, 0);
+      expect(progress.attemptCount, 1);
+    });
+
+    test('zero-star evaluated result records progress without lesson stars',
+        () async {
+      await buildController();
+      await connectAndStart();
+      await playStaggeredWithExtras();
+      await controller.endAttempt();
+
+      expect(controller.session.value.latestCompletedResult, isA<EvaluatedResult>());
+      final progress =
+          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+      expect(progress.stars, 0);
+      expect(progress.attemptCount, 1);
+    });
+
+    test('retry does not reuse the previous attempt events (NEP after retry)',
+        () async {
+      await buildController();
+      await connectAndStart();
+      await playPerfectBlock();
+      await controller.endAttempt();
+      expect(
+        (controller.runtime.currentInteraction!.items.first.attempts.first
+                .evaluationResult! as EvaluatedResult)
+            .stars,
+        5,
+      );
+
+      await controller.retryAttempt();
+      // No new events in the second attempt: it must finish NOT_ENOUGH_
+      // PERFORMANCE, proving the first block's events were not carried over.
+      await controller.endAttempt();
+
+      final attempts = controller.runtime.currentInteraction!.items.first.attempts;
+      expect(attempts.first.evaluationResult, isA<EvaluatedResult>());
+      expect(attempts.last.evaluationResult, isA<NotEnoughPerformanceResult>());
+      expect(
+        controller.session.value.latestCompletedResult,
+        isA<NotEnoughPerformanceResult>(),
+      );
+    });
+
+    test('retry clears the pressed projection for the new attempt', () async {
+      await buildController();
+      await connectAndStart();
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+
+      await controller.retryAttempt();
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+      expect(controller.session.value.attemptInProgress, isTrue);
     });
   });
 }

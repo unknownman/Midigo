@@ -190,7 +190,7 @@ class _PracticeViewState extends State<PracticeView> {
         ],
         FilledButton.icon(
           icon: const Icon(Icons.check),
-          label: const Text('Finish Attempt'),
+          label: const Text('Finish Practice'),
           onPressed: snapshot.attemptInProgress ? _finish : null,
         ),
       ],

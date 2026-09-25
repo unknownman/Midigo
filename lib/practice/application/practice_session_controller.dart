@@ -52,6 +52,15 @@ class PracticeSessionSnapshot {
   /// the UI.
   final Set<int> pressedNotes;
 
+  /// The authoritative [EvaluationResult] of the latest completed attempt,
+  /// exposed as-is from the frozen evaluation pipeline.
+  ///
+  /// Exactly one result kind exists at a time: [EvaluatedResult]
+  /// (EVALUATED, carries stars) or [NotEnoughPerformanceResult]
+  /// (NOT_ENOUGH_PERFORMANCE, carries no stars). The UI branches on this
+  /// object and never re-derives stars or correctness.
+  final EvaluationResult? latestCompletedResult;
+
   const PracticeSessionSnapshot({
     required this.isConnected,
     required this.sourceName,
@@ -68,6 +77,7 @@ class PracticeSessionSnapshot {
     required this.resultMessage,
     this.errorMessage,
     this.pressedNotes = const <int>{},
+    this.latestCompletedResult,
   });
 
   factory PracticeSessionSnapshot.initial() => const PracticeSessionSnapshot(
@@ -114,6 +124,7 @@ class PracticeSessionSnapshot {
     String? resultMessage,
     Object? errorMessage = _unset,
     Set<int>? pressedNotes,
+    Object? latestCompletedResult = _unset,
   }) {
     return PracticeSessionSnapshot(
       isConnected: isConnected ?? this.isConnected,
@@ -134,6 +145,9 @@ class PracticeSessionSnapshot {
       pressedNotes: pressedNotes == null
           ? this.pressedNotes
           : Set<int>.unmodifiable(pressedNotes),
+      latestCompletedResult: identical(latestCompletedResult, _unset)
+          ? this.latestCompletedResult
+          : latestCompletedResult as EvaluationResult?,
     );
   }
 
@@ -196,9 +210,25 @@ class PracticeSessionController {
   /// Read-only access for tests; UI must not mutate runtime state directly.
   PracticeRuntime get runtime => _runtime;
 
+  /// Whether per-attempt MIDI capture is currently recording.
+  ///
+  /// Application-layer capability view (exposed for focused tests to assert the
+  /// capture/evaluation boundary: capture must stop before evaluation reads the
+  /// buffer). The UI never needs this.
+  bool get isCapturing => _capture.isActive;
+
   final ValueNotifier<PracticeSessionSnapshot> session;
 
   bool _interactionStarted = false;
+
+  /// Guards against overlapping completions of the same active attempt.
+  ///
+  /// [endAttempt] is inherently async (stop capture -> evaluate -> complete ->
+  /// record); without this synchronous flag two rapid Finish taps would both
+  /// pass the `attemptInProgress` gate and double-activate/double-complete the
+  /// same attempt, corrupting the attempt lifecycle. Set before the first
+  /// await so concurrent calls observe it immediately.
+  bool _completionInProgress = false;
 
   Future<List<MidiSourceInfo>> listSources() => discovery.listSources();
 
@@ -383,15 +413,35 @@ class PracticeSessionController {
       errorMessage: null,
       resultMessage: '',
       currentStars: 0,
+      latestCompletedResult: null,
     );
   }
 
-  /// Ends the current attempt: snapshots the capture buffer, runs the frozen
-  /// evaluation pipeline, completes the attempt, and records lesson progress.
+  /// Finishes the current practice attempt and produces its result.
+  ///
+  /// The completion pipeline is: activate the attempt, stop MIDI capture
+  /// (a strict boundary -- recording never continues into evaluation), run the
+  /// frozen [EvaluationFlowService], complete the attempt with its actual
+  /// result, record lesson progress from that result, then refresh the
+  /// snapshot. Exactly one completion is honored even if Finish is invoked
+  /// concurrently or repeatedly while a completion is already in flight.
   Future<void> endAttempt() async {
-    if (!_interactionStarted || !session.value.attemptInProgress) {
+    if (!_interactionStarted ||
+        !session.value.attemptInProgress ||
+        _completionInProgress) {
       return;
     }
+    _completionInProgress = true;
+    try {
+      await _runCompletion();
+    } finally {
+      _completionInProgress = false;
+    }
+  }
+
+  /// Runs one completion end to end: stop capture, evaluate from the frozen
+  /// pipeline, complete the attempt, record progress, refresh the snapshot.
+  Future<void> _runCompletion() async {
     final target = targetProvider();
     final attempt = _runtime.currentItems.first.attempts.last;
     _runtime.activateAttempt(attempt.id);
@@ -439,6 +489,7 @@ class PracticeSessionController {
       resultMessage: '',
       currentStars: 0,
       errorMessage: null,
+      latestCompletedResult: null,
     );
   }
 
@@ -459,6 +510,7 @@ class PracticeSessionController {
       attemptCount: progress.attemptCount,
       attemptInProgress: attemptInProgress,
       resultMessage: _lastResultMessage(target, items),
+      latestCompletedResult: _latestCompletedResult(items),
     );
   }
 
