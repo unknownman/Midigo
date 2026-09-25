@@ -78,9 +78,12 @@ class _PracticeViewState extends State<PracticeView> {
   }
 
   String _liveStatus(PracticeSessionSnapshot snapshot) {
+    if (!snapshot.attemptInProgress) {
+      return 'Ready';
+    }
     final pressed = snapshot.pressedNotes.toList()..sort();
     if (pressed.isEmpty) {
-      return 'Attempt active';
+      return 'Practice in progress';
     }
     final names = pressed.map(TargetPrompt.pitchName).join(', ');
     return 'Pressed: $names · ${pressed.length} / '
@@ -154,27 +157,35 @@ class _PracticeViewState extends State<PracticeView> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Practice · ${snapshot.sourceName}', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(snapshot.targetDescription, style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        Text(snapshot.playInstruction),
-        const SizedBox(height: 8),
-        _HandLabel(instruction: widget.instruction),
+        KeyedSubtree(
+          key: const ValueKey('practice-target'),
+          child: Text(
+            snapshot.lessonTitle,
+            style: theme.textTheme.headlineSmall,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text('Practice · ${snapshot.sourceName}', style: theme.textTheme.bodyMedium),
         const SizedBox(height: 12),
+        _HandModeChips(instruction: widget.instruction),
+        const SizedBox(height: 12),
+        Text(
+          widget.instruction.modeInstruction,
+          style: theme.textTheme.titleMedium,
+        ),
+        const SizedBox(height: 12),
+        _FingeringSummary(instruction: widget.instruction),
+        const SizedBox(height: 16),
         PianoKeyboardView(
           instruction: widget.instruction,
           pressedNotes: snapshot.pressedNotes,
         ),
-        if (snapshot.attemptInProgress) ...[
-          const SizedBox(height: 8),
-          Text(
-            _liveStatus(snapshot),
-            key: const ValueKey('live-status'),
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
-          ),
-        ],
+        const SizedBox(height: 8),
+        Text(
+          _liveStatus(snapshot),
+          key: const ValueKey('live-status'),
+          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 16),
         if (snapshot.errorMessage != null) ...[
           Text(snapshot.errorMessage!, style: TextStyle(color: theme.colorScheme.error)),
@@ -193,8 +204,101 @@ class _PracticeViewState extends State<PracticeView> {
           label: const Text('Finish Practice'),
           onPressed: snapshot.attemptInProgress ? _finish : null,
         ),
+        const SizedBox(height: 8),
+        Text(
+          'Finishing evaluates this practice and shows your result.',
+          style: theme.textTheme.bodySmall,
+          textAlign: TextAlign.center,
+        ),
       ],
     );
+  }
+}
+
+/// Hand chips (right/left colors retained from Slice 2.1) plus the mode chip,
+/// mirroring the Teach screen so hand + mode identity stay consistent.
+class _HandModeChips extends StatelessWidget {
+  const _HandModeChips({required this.instruction});
+
+  final LessonInstruction instruction;
+
+  @override
+  Widget build(BuildContext context) {
+    final hands = <HandVisualStyle>[
+      if (instruction.hand == TargetHand.right ||
+          instruction.hand == TargetHand.bothUnison)
+        HandVisualStyle.right,
+      if (instruction.hand == TargetHand.left ||
+          instruction.hand == TargetHand.bothUnison)
+        HandVisualStyle.left,
+    ];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final hand in hands)
+          Chip(
+            avatar: Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: hand.color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            label: Text(hand.label),
+          ),
+        Chip(label: Text(instruction.modeLabel)),
+      ],
+    );
+  }
+}
+
+/// At-a-glance recommended fingering: note letter above the finger(s) that
+/// canonically play it, in target note order. Derived only from the canonical
+/// [LessonInstruction]; never inferred from MIDI.
+class _FingeringSummary extends StatelessWidget {
+  const _FingeringSummary({required this.instruction});
+
+  final LessonInstruction instruction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (final (i, key) in instruction.keys.indexed) ...[
+          if (i > 0) const SizedBox(width: 32),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                key.letterName,
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _fingerText(key),
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  static String _fingerText(LessonKeyVisual key) {
+    if (key.fingers.length == 2) {
+      final byHand = <TargetHand, int>{
+        for (final finger in key.fingers) finger.hand: finger.finger,
+      };
+      return '${byHand[TargetHand.right]}/${byHand[TargetHand.left]}';
+    }
+    return '${key.fingers.single.finger}';
   }
 }
 

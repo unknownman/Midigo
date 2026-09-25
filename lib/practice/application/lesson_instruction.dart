@@ -90,6 +90,14 @@ final class LessonInstruction {
   /// Whether the target must be played as an ordered sequence.
   final bool isArpeggio;
 
+  /// Concise learner instruction for this practice, derived from the frozen
+  /// target mode: "Play all notes together." (block) / "Play the notes in
+  /// order." (arpeggio). No timing, tempo, or accuracy claims are made.
+  String get modeInstruction => switch (target.mode) {
+        TargetMode.block => 'Play all notes together.',
+        TargetMode.arpeggio => 'Play the notes in order.',
+      };
+
   /// Target keys in the target's note order, with fingers + play-step.
   final List<LessonKeyVisual> keys;
 

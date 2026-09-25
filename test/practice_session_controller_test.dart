@@ -807,4 +807,37 @@ void main() {
       expect(controller.session.value.attemptInProgress, isTrue);
     });
   });
+
+  group('Slice 2.4 - practice guidance state', () {
+    test('no stale result leaks into a newly started attempt', () async {
+      await buildController();
+      await connectAndStart();
+      await playPerfectBlock();
+      await controller.endAttempt();
+      expect(controller.session.value.latestCompletedResult, isA<EvaluatedResult>());
+
+      await controller.startAttempt();
+
+      expect(controller.session.value.latestCompletedResult, isNull);
+      expect(controller.session.value.resultMessage, isEmpty);
+      expect(controller.session.value.attemptInProgress, isTrue);
+    });
+
+    test('retry resets live state into a fresh in-progress attempt', () async {
+      await buildController();
+      await connectAndStart();
+      stream._controller.add(_note(0, 1000, 60));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.session.value.pressedNotes, containsAll(<int>[60]));
+
+      await controller.retryAttempt();
+
+      expect(controller.session.value.pressedNotes, isEmpty);
+      expect(controller.session.value.attemptInProgress, isTrue);
+      expect(controller.session.value.latestCompletedResult, isNull);
+      expect(controller.session.value.resultMessage, isEmpty);
+      expect(controller.runtime.currentInteraction!.items.first.attempts,
+          hasLength(2));
+    });
+  });
 }

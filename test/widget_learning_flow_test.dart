@@ -56,7 +56,7 @@ void main() {
     await startPractice(tester);
 
     expect(find.text('Practice · APC Key 25'), findsOneWidget);
-    expect(find.text('Play C4, E4, and G4 together.'), findsOneWidget);
+    expect(find.text('Play all notes together.'), findsOneWidget);
 
     stream.pushPerfectCMajorBlock();
     await tester.pumpAndSettle();
@@ -112,6 +112,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Practice · APC Key 25'), findsOneWidget);
+    // Same lesson target, fresh attempt: no stale pressed/result text.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('practice-target')),
+        matching: find.text('C Major'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Block'), findsOneWidget);
+    expect(find.text('Play all notes together.'), findsOneWidget);
+    expect(find.text('Practice in progress'), findsOneWidget);
+    expect(find.textContaining('Pressed:'), findsNothing);
 
     stream.pushPerfectCMajorBlock();
     await tester.pumpAndSettle();
@@ -269,10 +282,25 @@ void main() {
       find.widgetWithText(FilledButton, 'Start Attempt'),
       findsOneWidget,
     );
+    // Idle/empty practice still shows the full guidance - the target is never
+    // hidden until a key is pressed.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('practice-target')),
+        matching: find.text('C Major'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Block'), findsOneWidget);
+    expect(find.text('Play all notes together.'), findsOneWidget);
+    expect(find.text('Ready'), findsOneWidget);
+    expect(find.text('Finish Practice'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Start Attempt'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Practice in progress'), findsOneWidget);
     expect(find.text('Finish Practice'), findsOneWidget);
   });
 
@@ -329,7 +357,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, 'Start Attempt'));
     await tester.pumpAndSettle();
-    expect(find.text('Attempt active'), findsOneWidget);
+    expect(find.text('Practice in progress'), findsOneWidget);
 
     stream.pushNoteOn(1, 1000, 60);
     await tester.pumpAndSettle();
@@ -458,5 +486,41 @@ void main() {
         .loadProgress(Slice1Catalog.cMajorTargetId);
     expect(progress.attemptCount, 1);
     expect(progress.stars, 5);
+  });
+
+  testWidgets('practice guidance is target-aware for the next lesson (arpeggio)',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(app());
+    // Two 5-star results complete lesson 1 and unlock lesson 2 (C Major
+    // arpeggio): its practice guidance must come from ITS target, not a
+    // hardcoded block presentation.
+    final service = LessonProgressService(store: store);
+    for (var i = 0; i < 2; i++) {
+      await service.recordResult(
+        targetId: Slice1Catalog.cMajorTargetId,
+        result: EvaluatedResult(stars: 5, dimensions: const []),
+      );
+    }
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lesson 2 · C Major'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start Practice'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('practice-target')),
+        matching: find.text('C Major'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Arpeggio'), findsOneWidget);
+    expect(find.text('Play the notes in order.'), findsOneWidget);
+    expect(find.text('Practice in progress'), findsOneWidget);
   });
 }
