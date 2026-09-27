@@ -38,9 +38,19 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> startPractice(WidgetTester tester) async {
-    await tester.tap(find.text('Start Practice'));
+  Future<void> passThroughTeach(WidgetTester tester) async {
+    while (find.widgetWithText(FilledButton, 'Next')
+        .evaluate()
+        .isNotEmpty) {
+      await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.widgetWithText(FilledButton, 'Start Practice'));
     await tester.pumpAndSettle();
+  }
+
+  Future<void> startPractice(WidgetTester tester) async {
+    await passThroughTeach(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
     await tester.pumpAndSettle();
   }
@@ -51,7 +61,10 @@ void main() {
 
     expect(find.text('Lesson 1 · C Major'), findsOneWidget);
     expect(find.text('C Major · Right Hand · Played together'), findsOneWidget);
-    expect(find.text('Target notes: C4, E4, G4'), findsOneWidget);
+    expect(find.text('Step 1 of 10'), findsOneWidget);
+    expect(find.text('Target notes: C4, E4, G4'), findsNothing);
+    expect(find.widgetWithText(Chip, 'Block'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
 
     await startPractice(tester);
 
@@ -265,7 +278,7 @@ void main() {
     // Reopening a completed lesson stays accessible and never resets it.
     await tester.tap(find.text('Lesson 1 · C Major'));
     await tester.pumpAndSettle();
-    expect(find.text('Start Practice'), findsOneWidget);
+    expect(find.text('Step 1 of 10'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('Completed'), findsOneWidget);
@@ -325,12 +338,11 @@ void main() {
     expect(find.text('Lesson 2 · C Major'), findsOneWidget);
     expect(find.text('C Major · Right Hand · Played one at a time'),
         findsOneWidget);
-    expect(find.text('Target notes: C4, E4, G4, C5'), findsOneWidget);
-    expect(
-        find.text('Press C, E, G, and C one at a time on the right side '
-            'of the keyboard.'),
-        findsOneWidget);
-    expect(find.text('Start Practice'), findsOneWidget);
+    expect(find.text('Step 1 of 10'), findsOneWidget);
+    expect(find.text('Target notes: C4, E4, G4, C5'), findsNothing);
+    expect(find.widgetWithText(Chip, 'Arpeggio'), findsOneWidget);
+    expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Next'), findsOneWidget);
   });
 
   testWidgets('Continue on an incomplete lesson returns to the path',
@@ -371,8 +383,7 @@ void main() {
     await tester.tap(find.text('Lesson 1 · C Major'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Start Practice'));
-    await tester.pumpAndSettle();
+    await passThroughTeach(tester);
 
     expect(find.text('Practice · APC Key 25'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Connect'), findsNothing);
@@ -416,8 +427,7 @@ void main() {
     await tester.tap(find.text('Lesson 1 · C Major'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Start Practice'));
-    await tester.pumpAndSettle();
+    await passThroughTeach(tester);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
     await tester.pumpAndSettle();
@@ -445,8 +455,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Lesson 1 · C Major'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Start Practice'));
-    await tester.pumpAndSettle();
+    await passThroughTeach(tester);
 
     // Not in an attempt yet: a live press is not projected.
     stream.pushNoteOn(0, 1000, 60);
@@ -605,8 +614,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Lesson 2 · C Major'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Start Practice'));
-    await tester.pumpAndSettle();
+    await passThroughTeach(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
     await tester.pumpAndSettle();
 

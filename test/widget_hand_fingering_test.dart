@@ -43,49 +43,81 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> tapNext(WidgetTester tester) async {
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> advanceToStep(WidgetTester tester, int step) async {
+    for (var i = 1; i < step; i++) {
+      await tapNext(tester);
+    }
+    expect(find.text('Step $step of 10'), findsOneWidget);
+  }
+
   ColoredBox filledBox(WidgetTester tester, String keyName) =>
       tester.widget<ColoredBox>(find.descendant(
         of: find.byKey(ValueKey<String>(keyName)),
         matching: find.byType(ColoredBox),
       ));
 
-  testWidgets('teach view presents C Major right-hand block hand + fingering',
+  testWidgets('teach wizard shows C Major right-hand block hand + fingering',
       (tester) async {
     store = InMemoryLessonProgressStore();
     await openLesson(tester, 'Lesson 1 · C Major');
 
     expect(find.text('Lesson 1 · C Major'), findsOneWidget);
     expect(find.text('C Major · Right Hand · Played together'), findsOneWidget);
-    expect(find.text('Target notes: C4, E4, G4'), findsOneWidget);
+    expect(find.text('Step 1 of 10'), findsOneWidget);
     expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
     expect(find.widgetWithText(Chip, 'Block'), findsOneWidget);
-    expect(find.text('Right Hand fingering: 1, 3, 5'), findsOneWidget);
-    expect(find.byKey(const ValueKey<String>('step-1')), findsNothing);
+    expect(find.text('Target notes: C4, E4, G4'), findsNothing);
 
+    await advanceToStep(tester, 6);
+
+    expect(find.text('Where are C, E and G on the keyboard?'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('step-1')), findsNothing);
     for (final pitch in <int>[60, 64, 67]) {
       expect(filledBox(tester, 'key-$pitch').color,
           HandVisualStyle.right.color);
     }
+
+    await tapNext(tester);
+
+    expect(find.text('Right-hand fingering'), findsOneWidget);
+    expect(find.textContaining('thumb (1) on C'), findsOneWidget);
+    expect(find.textContaining('middle finger (3) on E'), findsOneWidget);
+    expect(find.textContaining('pinky (5) on G'), findsOneWidget);
+    expect(find.textContaining('Play all three together.'), findsOneWidget);
   });
 
-  testWidgets('teach view presents C Major right-hand arpeggio order and steps',
+  testWidgets('teach wizard shows C Major right-hand arpeggio order and steps',
       (tester) async {
     store = InMemoryLessonProgressStore();
     await unlockTarget('major-c-rh-block');
     await openLesson(tester, 'Lesson 2 · C Major');
 
+    expect(find.text('Step 1 of 10'), findsOneWidget);
     expect(find.widgetWithText(Chip, 'Right Hand'), findsOneWidget);
     expect(find.widgetWithText(Chip, 'Arpeggio'), findsOneWidget);
-    expect(find.text('Right Hand fingering: 1, 2, 3, 5'), findsOneWidget);
-    expect(find.text('Played order: C \u2192 E \u2192 G \u2192 C'),
-        findsOneWidget);
+
+    await advanceToStep(tester, 6);
+
     for (var step = 1; step <= 4; step++) {
       expect(find.byKey(ValueKey<String>('step-$step')), findsOneWidget);
     }
     expect(filledBox(tester, 'key-67').color, HandVisualStyle.right.color);
+    expect(filledBox(tester, 'key-72').color, HandVisualStyle.right.color);
+
+    await tapNext(tester);
+
+    expect(find.textContaining('index finger (2) on E'), findsOneWidget);
+    expect(find.textContaining('middle finger (3) on G'), findsOneWidget);
+    expect(find.textContaining('pinky (5) on C'), findsOneWidget);
+    expect(find.textContaining('Play the notes in order.'), findsOneWidget);
   });
 
-  testWidgets('teach view presents C Major left-hand block mirrored fingering',
+  testWidgets('teach wizard shows C Major left-hand block mirrored fingering',
       (tester) async {
     store = InMemoryLessonProgressStore();
     await unlockTarget('major-c-rh-block');
@@ -93,13 +125,22 @@ void main() {
     await openLesson(tester, 'Lesson 3 · C Major');
 
     expect(find.text('C Major · Left Hand · Played together'), findsOneWidget);
+    expect(find.text('Step 1 of 10'), findsOneWidget);
     expect(find.widgetWithText(Chip, 'Left Hand'), findsOneWidget);
     expect(find.widgetWithText(Chip, 'Block'), findsOneWidget);
-    expect(find.text('Left Hand fingering: 5, 3, 1'), findsOneWidget);
+
+    await advanceToStep(tester, 6);
+
     expect(find.byKey(const ValueKey<String>('step-1')), findsNothing);
     for (final pitch in <int>[60, 64, 67]) {
       expect(filledBox(tester, 'key-$pitch').color,
           HandVisualStyle.left.color);
     }
+
+    await tapNext(tester);
+
+    expect(find.textContaining('pinky (5) on C'), findsOneWidget);
+    expect(find.textContaining('thumb (1) on G'), findsOneWidget);
+    expect(find.textContaining('Play all notes together.'), findsOneWidget);
   });
 }

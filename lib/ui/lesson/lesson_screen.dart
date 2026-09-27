@@ -11,7 +11,7 @@ import '../../practice/application/learning_path_service.dart';
 import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/lesson_progress_service.dart';
 import '../../practice/application/practice_session_controller.dart';
-import '../../practice/application/target_prompt.dart';
+import '../../practice/application/teach_sequence.dart';
 import '../../practice/domain/learning_lesson.dart';
 import '../../practice/domain/learning_path.dart';
 import '../../practice/domain/practice_clock.dart';
@@ -146,9 +146,11 @@ class _LessonScreenState extends State<LessonScreen> {
           return switch (stage) {
             _Stage.teach => TeachView(
                 lesson: widget.lesson,
-                noteNames: TargetPrompt.noteNames(target),
-                pressInstruction: TargetPrompt.pressInstruction(target),
                 instruction: instruction,
+                steps: TeachSequence().build(
+                  lesson: widget.lesson,
+                  instruction: instruction,
+                ),
                 onStartPractice: _startPractice,
               ),
             _Stage.practice => PracticeView(
