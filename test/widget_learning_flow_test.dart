@@ -540,8 +540,8 @@ void main() {
     expect(find.text('In Progress'), findsOneWidget);
   });
 
-  testWidgets('Continue after NOT_ENOUGH_PERFORMANCE leaves the next lesson '
-      'locked', (WidgetTester tester) async {
+  testWidgets('NOT_ENOUGH_PERFORMANCE never completes the exercise, so Continue '
+      'stays disabled until the exercise is completed', (WidgetTester tester) async {
     await goToLesson(tester);
     await startPractice(tester);
 
@@ -551,6 +551,35 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('nep-message')), findsOneWidget);
+
+    // NEP is a real attempt but never completes the exercise: no 'Practice
+    // Complete' milestone, Continue disabled, and only a Retry path forward.
+    expect(find.byKey(const ValueKey('practice-complete')), findsNothing);
+    final disabledContinue = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Continue'),
+    );
+    expect(disabledContinue.onPressed, isNull);
+    expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+    expect(find.byKey(const ValueKey('continue-hint')), findsOneWidget);
+    expect(find.text('Locked'), findsNothing);
+
+    // Retry the SAME exercise, pass the block, then Continue completes the
+    // lesson Progress flow. The next lesson stays locked at 5/10 stars.
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+    await tester.pumpAndSettle();
+    stream.pushPerfectCMajorBlock();
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish Practice'));
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('practice-complete')), findsOneWidget);
+    final enabledContinue = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Continue'),
+    );
+    expect(enabledContinue.onPressed, isNotNull);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();

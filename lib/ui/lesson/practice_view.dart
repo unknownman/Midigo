@@ -15,11 +15,16 @@ class PracticeView extends StatefulWidget {
     required this.controller,
     required this.instruction,
     required this.onFinished,
+    this.exerciseContext,
   });
 
   final PracticeSessionController controller;
   final LessonInstruction instruction;
   final VoidCallback onFinished;
+
+  /// Learner-facing exercise position/title (e.g. 'Exercise 1 of 1 · Guided
+  /// Block Practice').
+  final String? exerciseContext;
 
   @override
   State<PracticeView> createState() => _PracticeViewState();
@@ -96,6 +101,14 @@ class _PracticeViewState extends State<PracticeView> {
       padding: const EdgeInsets.all(16),
       children: [
         Text('Practice', style: theme.textTheme.headlineSmall),
+        if (widget.exerciseContext != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            widget.exerciseContext!,
+            key: const ValueKey('practice-exercise-context'),
+            style: theme.textTheme.titleSmall,
+          ),
+        ],
         const SizedBox(height: 8),
         Text('Connect your MIDI keyboard to start.', style: theme.textTheme.bodyLarge),
         const SizedBox(height: 4),
@@ -166,6 +179,14 @@ class _PracticeViewState extends State<PracticeView> {
         ),
         const SizedBox(height: 4),
         Text('Practice · ${snapshot.sourceName}', style: theme.textTheme.bodyMedium),
+        if (widget.exerciseContext != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            widget.exerciseContext!,
+            key: const ValueKey('practice-exercise-context'),
+            style: theme.textTheme.titleSmall,
+          ),
+        ],
         const SizedBox(height: 12),
         _HandModeChips(instruction: widget.instruction),
         const SizedBox(height: 12),

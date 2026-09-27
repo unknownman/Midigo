@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../midi/domain/evaluation_result.dart';
 import '../../practice/application/lesson_progress.dart';
 import '../../practice/application/practice_session_controller.dart';
+import '../../practice/domain/practice_exercise.dart';
 import '../widgets/star_display.dart';
 
 /// Shows the outcome of the just-finished practice.
@@ -20,17 +21,35 @@ import '../widgets/star_display.dart';
 /// lesson state (`In Progress` / `Completed`) is shown alongside it so the
 /// completion boundary at 10/10 is explicit. A lesson that just produced an
 /// attempt is never `New` here: [PracticeSessionSnapshot.attemptCount] >= 1.
+///
+/// Exercise completion is surfaced distinctly (keyed `practice-complete`):
+/// it is the structural precondition for [canContinue], never a mastery claim.
 class ResultView extends StatelessWidget {
   const ResultView({
     super.key,
     required this.snapshot,
     required this.onRetry,
     required this.onContinue,
+    this.exerciseContext,
+    this.practiceComplete = false,
+    this.canContinue = true,
   });
 
   final PracticeSessionSnapshot snapshot;
   final VoidCallback onRetry;
   final Future<void> Function() onContinue;
+
+  /// Learner-facing exercise position/title ('Exercise 1 of 1 · Guided Block
+  /// Practice').
+  final String? exerciseContext;
+
+  /// Whether the whole Practice Sequence is complete (all exercises completed
+  /// this session, §12). Shown as a distinct completion milestone.
+  final bool practiceComplete;
+
+  /// Whether the learner may continue (Sequence complete). When false the
+  /// Continue action is disabled - a NEP or zero-star result never unlocks it.
+  final bool canContinue;
 
   @override
   Widget build(BuildContext context) {
@@ -48,8 +67,28 @@ class ResultView extends StatelessWidget {
           '${snapshot.lessonTitle} · Your Practice',
           style: theme.textTheme.titleMedium,
         ),
+        if (exerciseContext != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            exerciseContext!,
+            key: const ValueKey('result-exercise-context'),
+            style: theme.textTheme.titleSmall,
+          ),
+        ],
         const SizedBox(height: 24),
         ..._resultSection(theme),
+        if (practiceComplete) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: KeyedSubtree(
+              key: const ValueKey('practice-complete'),
+              child: Chip(
+                avatar: const Icon(Icons.check_circle, size: 18),
+                label: const Text('Practice Complete'),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         const Divider(),
         const SizedBox(height: 8),
@@ -92,12 +131,23 @@ class ResultView extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: FilledButton(
-                onPressed: onContinue,
+                onPressed: canContinue ? onContinue : null,
                 child: const Text('Continue'),
               ),
             ),
           ],
         ),
+        if (!canContinue) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Complete the exercise with '
+            '${PracticeExercise.completionStarThreshold} or more stars to '
+            'continue.',
+            key: const ValueKey('continue-hint'),
+            style: theme.textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ],
       ],
     );
   }

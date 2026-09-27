@@ -149,12 +149,82 @@ final class LearningCatalog {
     if (form == null) {
       throw StateError('LearningCatalog: no form for lesson "${lesson.id}".');
     }
+    return _buildTargetFromForm(form, lesson.targetId);
+  }
+
+  /// The musical form keyed by pinned target id, mirroring [_formsByLessonId].
+  static const Map<String, ({
+    TargetQuality quality,
+    TargetRoot root,
+    TargetHand hand,
+    TargetMode mode
+  })> _formsByTargetId = <String, ({
+    TargetQuality quality,
+    TargetRoot root,
+    TargetHand hand,
+    TargetMode mode
+  })>{
+    'major-c-rh-block': (
+      quality: TargetQuality.major,
+      root: TargetRoot.c,
+      hand: TargetHand.right,
+      mode: TargetMode.block,
+    ),
+    'major-c-rh-arpeggio': (
+      quality: TargetQuality.major,
+      root: TargetRoot.c,
+      hand: TargetHand.right,
+      mode: TargetMode.arpeggio,
+    ),
+    'major-c-lh-block': (
+      quality: TargetQuality.major,
+      root: TargetRoot.c,
+      hand: TargetHand.left,
+      mode: TargetMode.block,
+    ),
+    'major-c-lh-arpeggio': (
+      quality: TargetQuality.major,
+      root: TargetRoot.c,
+      hand: TargetHand.left,
+      mode: TargetMode.arpeggio,
+    ),
+    'major-c-bothUnison-block': (
+      quality: TargetQuality.major,
+      root: TargetRoot.c,
+      hand: TargetHand.bothUnison,
+      mode: TargetMode.block,
+    ),
+    'major-c-bothUnison-arpeggio': (
+      quality: TargetQuality.major,
+      root: TargetRoot.c,
+      hand: TargetHand.bothUnison,
+      mode: TargetMode.arpeggio,
+    ),
+  };
+
+  /// Builds the deterministic expected target for a pinned [targetId].
+  ///
+  /// Exercise sequences reference exercises by [PracticeExercise.targetId];
+  /// this is the catalog-owned route from a target id back to its frozen
+  /// musical form (same forms the lessons build through [buildTarget]).
+  ExpectedMusicalTarget buildTargetForTargetId(String targetId) {
+    final form = _formsByTargetId[targetId];
+    if (form == null) {
+      throw StateError('LearningCatalog: no form for target "$targetId".');
+    }
+    return _buildTargetFromForm(form, targetId);
+  }
+
+  ExpectedMusicalTarget _buildTargetFromForm(
+    ({TargetQuality quality, TargetRoot root, TargetHand hand, TargetMode mode}) form,
+    String targetId,
+  ) {
     return const ExpectedMusicalTargetFactory().build(
       quality: form.quality,
       root: form.root,
       hand: form.hand,
       mode: form.mode,
-      targetId: lesson.targetId,
+      targetId: targetId,
     );
   }
 }

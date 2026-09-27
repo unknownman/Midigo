@@ -10,11 +10,15 @@ import '../../practice/application/learning_catalog.dart';
 import '../../practice/application/learning_path_service.dart';
 import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/lesson_progress_service.dart';
+import '../../practice/application/practice_sequence_catalog.dart';
+import '../../practice/application/practice_sequence_controller.dart';
 import '../../practice/application/practice_session_controller.dart';
 import '../../practice/application/teach_sequence.dart';
 import '../../practice/domain/learning_lesson.dart';
 import '../../practice/domain/learning_path.dart';
 import '../../practice/domain/practice_clock.dart';
+import '../../practice/domain/practice_exercise.dart';
+import '../../midi/domain/evaluation_result.dart';
 import 'practice_view.dart';
 import 'result_view.dart';
 import 'teach_view.dart';
@@ -49,31 +53,54 @@ class LessonScreen extends StatefulWidget {
 
 class _LessonScreenState extends State<LessonScreen> {
   final ValueNotifier<_Stage> _stage = ValueNotifier<_Stage>(_Stage.teach);
-  late final PracticeSessionController _controller;
-  bool _controllerBuilt = false;
+
+  // The Lesson owns one deterministic Practice Sequence; N = 1 today but the
+  // controller is N-capable (architecture §14): exercises map one-to-one to
+  // genuinely distinct, runtime-executable interactions - never a label around
+  // the same interaction.
+  late final PracticeSequence _practiceSequence;
+  late final PracticeSequenceController _sequence;
+
+  // One session per exercise, cached by exercise id. Advancing to a different
+  // exercise builds a fresh session controller (fresh capture/interaction
+  // boundary); retrying the same exercise reuses it via retryAttempt().
+  String? _sessionExerciseId;
+  PracticeSessionController? _session;
 
   PracticeSessionController get _ensureController {
-    if (!_controllerBuilt) {
-      _controller = PracticeSessionController(
-        discovery: widget.discovery,
-        connection: widget.connection,
-        captureFactory: widget.captureFactory,
-        evaluation: const EvaluationFlowService(),
-        progressService: widget.progressService,
-        clock: widget.clock,
-        targetProvider: () => widget.catalog.buildTarget(widget.lesson),
-      );
-      _controllerBuilt = true;
+    final exercise = _sequence.value.currentExercise;
+    if (_session != null && _sessionExerciseId == exercise.id) {
+      return _session!;
     }
-    return _controller;
+    _session?.dispose();
+    final fresh = PracticeSessionController(
+      discovery: widget.discovery,
+      connection: widget.connection,
+      captureFactory: widget.captureFactory,
+      evaluation: const EvaluationFlowService(),
+      progressService: widget.progressService,
+      clock: widget.clock,
+      targetProvider: () =>
+          widget.catalog.buildTargetForTargetId(exercise.targetId),
+    );
+    _session = fresh;
+    _sessionExerciseId = exercise.id;
+    return fresh;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _practiceSequence =
+        PracticeSequenceCatalog(widget.catalog).sequenceFor(widget.lesson);
+    _sequence = PracticeSequenceController(sequence: _practiceSequence);
   }
 
   @override
   void dispose() {
     _stage.dispose();
-    if (_controllerBuilt) {
-      _controller.dispose();
-    }
+    _sequence.dispose();
+    _session?.dispose();
     super.dispose();
   }
 
@@ -83,7 +110,20 @@ class _LessonScreenState extends State<LessonScreen> {
     });
   }
 
+  /// Marks the just-finished exercise completed when the authoritative
+  /// evaluated result cleared the completion threshold (§12). NEP and
+  /// zero-star evaluated results are real attempts but never complete the
+  /// exercise, so Continue stays gated and the learner must retry.
+  void _syncExerciseCompletion() {
+    final result = _ensureController.session.value.latestCompletedResult;
+    if (result is EvaluatedResult &&
+        result.stars >= PracticeExercise.completionStarThreshold) {
+      _sequence.completeCurrentExercise();
+    }
+  }
+
   void _toResult() {
+    _syncExerciseCompletion();
     setState(() {
       _stage.value = _Stage.result;
     });
@@ -97,9 +137,9 @@ class _LessonScreenState extends State<LessonScreen> {
   }
 
   /// Continues: opens the next lesson when it became available, otherwise
-  /// returns to the Learning Path.
+  /// returns to the Learning Path. Only reachable once the sequence completes.
   Future<void> _continue() async {
-    await _controller.disconnect();
+    await _ensureController.disconnect();
     if (!mounted) {
       return;
     }
@@ -131,12 +171,25 @@ class _LessonScreenState extends State<LessonScreen> {
     }
   }
 
+  String get _exerciseContext {
+    final snapshot = _sequence.value;
+    return 'Exercise ${snapshot.currentIndex + 1} of '
+        '${snapshot.totalExercises} · ${snapshot.currentExercise.title}';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final target = widget.catalog.buildTarget(widget.lesson);
-    final instruction = LessonInstructionFactory().build(
-      target: target,
+    final teachTarget = widget.catalog.buildTarget(widget.lesson);
+    final teachInstruction = LessonInstructionFactory().build(
+      target: teachTarget,
       fingerings: const FingeringCatalog().fingeringsFor(widget.lesson.targetId),
+    );
+    final exerciseTarget = widget.catalog
+        .buildTargetForTargetId(_sequence.value.currentExercise.targetId);
+    final exerciseInstruction = LessonInstructionFactory().build(
+      target: exerciseTarget,
+      fingerings:
+          const FingeringCatalog().fingeringsFor(exerciseTarget.targetId),
     );
     return Scaffold(
       appBar: AppBar(title: Text(widget.lesson.title)),
@@ -146,20 +199,24 @@ class _LessonScreenState extends State<LessonScreen> {
           return switch (stage) {
             _Stage.teach => TeachView(
                 lesson: widget.lesson,
-                instruction: instruction,
+                instruction: teachInstruction,
                 steps: TeachSequence().build(
                   lesson: widget.lesson,
-                  instruction: instruction,
+                  instruction: teachInstruction,
                 ),
                 onStartPractice: _startPractice,
               ),
             _Stage.practice => PracticeView(
                 controller: _ensureController,
-                instruction: instruction,
+                instruction: exerciseInstruction,
                 onFinished: _toResult,
+                exerciseContext: _exerciseContext,
               ),
             _Stage.result => ResultView(
-                snapshot: _controller.session.value,
+                snapshot: _ensureController.session.value,
+                exerciseContext: _exerciseContext,
+                practiceComplete: _sequence.value.sequenceComplete,
+                canContinue: _sequence.value.sequenceComplete,
                 onRetry: _retry,
                 onContinue: _continue,
               ),
