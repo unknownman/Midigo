@@ -70,6 +70,8 @@ void main() {
     expect(find.text('Result'), findsOneWidget);
     expect(find.text('Perfect! All notes matched.'), findsOneWidget);
     expect(find.text('5 / 10 stars'), findsOneWidget);
+    // A 5/10 lesson that has been attempted is In Progress, not Completed.
+    expect(find.text('In Progress'), findsOneWidget);
     // The attempt's own stars come from the actual EvaluatedResult.
     expect(
       find.descendant(
@@ -136,6 +138,8 @@ void main() {
 
     expect(find.text('Result'), findsOneWidget);
     expect(find.text('10 / 10 stars'), findsOneWidget);
+    // The lesson reached the 10-star capacity: its state is now Completed.
+    expect(find.text('Completed'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('lesson-progress')),
@@ -163,6 +167,8 @@ void main() {
     // "0/5" does not read like a zero-star evaluation.
     expect(find.byKey(const ValueKey('attempt-stars')), findsNothing);
     expect(find.text('0 / 10 stars'), findsOneWidget);
+    // The attempted-but-unscored lesson is In Progress, not New.
+    expect(find.text('In Progress'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('lesson-progress')),
@@ -187,9 +193,99 @@ void main() {
       expect(find.text('Lesson $i · C Major'), findsOneWidget);
     }
     expect(find.text('0 / 10 stars'), findsOneWidget);
+    expect(find.text('New'), findsOneWidget);
+    expect(find.text('In Progress'), findsNothing);
+    expect(find.text('Completed'), findsNothing);
     expect(find.text('Locked'), findsNWidgets(5));
     expect(find.byIcon(Icons.lock), findsNWidgets(5));
     expect(find.byIcon(Icons.music_note), findsOneWidget);
+    // The available lesson also renders its hand/mode form from the catalog.
+    expect(find.text('C Major · Right Hand · Played together'), findsOneWidget);
+  });
+
+  testWidgets('learning path marks an attempted lesson as In Progress',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(app());
+    await LessonProgressService(store: store).recordResult(
+      targetId: Slice1Catalog.cMajorTargetId,
+      result: EvaluatedResult(stars: 3, dimensions: const []),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('In Progress'), findsOneWidget);
+    expect(find.text('3 / 10 stars'), findsOneWidget);
+    expect(find.text('New'), findsNothing);
+    expect(find.text('Completed'), findsNothing);
+    expect(find.text('Locked'), findsNWidgets(5));
+  });
+
+  testWidgets('learning path marks a completed lesson Completed and the next '
+      'lesson New', (WidgetTester tester) async {
+    await tester.pumpWidget(app());
+    final service = LessonProgressService(store: store);
+    for (var i = 0; i < 2; i++) {
+      await service.recordResult(
+        targetId: Slice1Catalog.cMajorTargetId,
+        result: EvaluatedResult(stars: 5, dimensions: const []),
+      );
+    }
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('10 / 10 stars'), findsOneWidget);
+    expect(find.byIcon(Icons.check_circle), findsOneWidget);
+    expect(find.text('New'), findsOneWidget);
+    expect(find.text('0 / 10 stars'), findsOneWidget);
+    expect(find.text('C Major · Right Hand · Played one at a time'),
+        findsOneWidget);
+    expect(find.text('In Progress'), findsNothing);
+    expect(find.text('Locked'), findsNWidgets(4));
+  });
+
+  testWidgets('a completed lesson stays completed after reopening and reload',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(app());
+    final service = LessonProgressService(store: store);
+    for (var i = 0; i < 2; i++) {
+      await service.recordResult(
+        targetId: Slice1Catalog.cMajorTargetId,
+        result: EvaluatedResult(stars: 5, dimensions: const []),
+      );
+    }
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('10 / 10 stars'), findsOneWidget);
+
+    // Reopening a completed lesson stays accessible and never resets it.
+    await tester.tap(find.text('Lesson 1 · C Major'));
+    await tester.pumpAndSettle();
+    expect(find.text('Start Practice'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('10 / 10 stars'), findsOneWidget);
+
+    // A full reload re-reads the same persisted store: still Completed.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(MidiTutorApp(
+      discovery: FakeDiscovery(),
+      connection: FakeConnection(),
+      captureFactory: () => FakeMidiStream(),
+      progressStore: store,
+      clock: FakeClock(DateTime(2025, 1, 1, 9, 0, 0)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Learning Path'));
+    await tester.pumpAndSettle();
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('10 / 10 stars'), findsOneWidget);
   });
 
   testWidgets('completing lesson 1 unlocks lesson 2 and Continue opens it',
@@ -217,6 +313,8 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('Result'), findsOneWidget);
+    expect(find.text('10 / 10 stars'), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
 
     await tester.runAsync(() async {
       await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
@@ -430,6 +528,7 @@ void main() {
       findsNWidgets(5),
     );
     expect(find.text('0 / 10 stars'), findsOneWidget);
+    expect(find.text('In Progress'), findsOneWidget);
   });
 
   testWidgets('Continue after NOT_ENOUGH_PERFORMANCE leaves the next lesson '

@@ -16,7 +16,10 @@ import '../widgets/star_display.dart';
 ///     with no attempt-star row (an empty row would read like a zero-star pass).
 ///   * null: placeholder pending state.
 /// Lesson progress is rendered separately (keyed `lesson-progress`) and can
-/// never be confused with a single attempt's stars.
+/// never be confused with a single attempt's stars. The derived learner-facing
+/// lesson state (`In Progress` / `Completed`) is shown alongside it so the
+/// completion boundary at 10/10 is explicit. A lesson that just produced an
+/// attempt is never `New` here: [PracticeSessionSnapshot.attemptCount] >= 1.
 class ResultView extends StatelessWidget {
   const ResultView({
     super.key,
@@ -32,6 +35,10 @@ class ResultView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final lessonState = LessonProgressState.derive(
+      stars: snapshot.lessonStars,
+      attemptCount: snapshot.attemptCount,
+    );
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -65,6 +72,13 @@ class ResultView extends StatelessWidget {
               style: theme.textTheme.bodyMedium,
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          lessonState.label,
+          key: const ValueKey('lesson-state'),
+          style: theme.textTheme.bodyMedium,
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 24),
         Row(

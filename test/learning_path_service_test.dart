@@ -117,4 +117,31 @@ void main() {
           'lesson-major-c-rh-block');
     });
   });
+
+  group('learner-facing lesson state derives from persisted facts', () {
+    test('a fresh lesson is New', () async {
+      final path = await service.loadPath();
+      expect(path.lessons[0].progress.lessonState,
+          LessonProgressState.newLesson);
+      expect(path.lessons[0].progress.lessonState.label, 'New');
+    });
+
+    test('an attempted but incomplete lesson is In Progress', () async {
+      await seed('major-c-rh-block', 3, 1);
+      final path = await service.loadPath();
+      expect(path.lessons[0].progress.lessonState,
+          LessonProgressState.inProgress);
+      expect(path.lessons[0].availability, LessonAvailability.inProgress);
+    });
+
+    test('a completed lesson is Completed', () async {
+      await seed('major-c-rh-block', 10, 2);
+      final path = await service.loadPath();
+      expect(path.lessons[0].progress.lessonState,
+          LessonProgressState.completed);
+      expect(path.lessons[1].progress.lessonState,
+          LessonProgressState.newLesson);
+      expect(path.lessons[1].availability, LessonAvailability.available);
+    });
+  });
 }

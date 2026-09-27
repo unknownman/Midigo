@@ -5,11 +5,13 @@ import '../../midi/application/midi_device_discovery.dart';
 import '../../midi/application/midi_event_stream.dart';
 import '../../practice/application/learning_catalog.dart';
 import '../../practice/application/learning_path_service.dart';
+import '../../practice/application/lesson_progress.dart';
 import '../../practice/application/lesson_progress_service.dart';
 import '../../practice/domain/learning_lesson.dart';
 import '../../practice/domain/learning_path.dart';
 import '../../practice/domain/practice_clock.dart';
 import '../lesson/lesson_screen.dart';
+import '../widgets/star_display.dart';
 
 class LearningPathScreen extends StatelessWidget {
   const LearningPathScreen({
@@ -98,6 +100,31 @@ class _LessonTile extends StatelessWidget {
             ? Icons.check_circle
             : Icons.music_note;
 
+    final Widget subtitle = locked
+        ? const Text('Locked')
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(state.lesson.subtitle),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  StarDisplay(
+                    filled: state.progress.stars,
+                    capacity: LessonProgress.starCapacity,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 8),
+                  Text('${state.progress.stars} / 10 stars'),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(state.progress.lessonState.label),
+            ],
+          );
+
     return Card(
       child: ListTile(
         enabled: !locked,
@@ -106,13 +133,7 @@ class _LessonTile extends StatelessWidget {
           'Lesson ${state.lesson.order} · ${state.lesson.title}',
           style: locked ? theme.textTheme.bodyLarge?.copyWith(color: theme.disabledColor) : null,
         ),
-        subtitle: Text(
-          locked
-              ? 'Locked'
-              : completed
-                  ? '${state.progress.stars} / 10 stars · completed'
-                  : '${state.progress.stars} / 10 stars',
-        ),
+        subtitle: subtitle,
         trailing: locked ? null : const Icon(Icons.chevron_right),
         onTap: locked ? null : onOpen,
       ),

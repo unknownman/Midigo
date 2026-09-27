@@ -82,6 +82,49 @@ void main() {
       expect(p.attemptCount, 2);
     });
 
+    test('fresh progress derives the New state', () {
+      final p = LessonProgress.initial(targetId);
+      expect(p.lessonState, LessonProgressState.newLesson);
+      expect(p.lessonState.label, 'New');
+    });
+
+    test('a zero-star evaluated attempt derives In Progress, not New', () {
+      final p = LessonProgress.initial(targetId).applyEvaluationResult(evaluated(0));
+      expect(p.lessonState, LessonProgressState.inProgress);
+      expect(p.lessonState.label, 'In Progress');
+    });
+
+    test('a not-enough-performance derives In Progress, not New', () {
+      final p = LessonProgress.initial(targetId).applyEvaluationResult(notEnough);
+      expect(p.lessonState, LessonProgressState.inProgress);
+    });
+
+    test('a single five-star attempt derives In Progress, not Completed', () {
+      final p = LessonProgress.initial(targetId).applyEvaluationResult(evaluated(5));
+      expect(p.stars, 5);
+      expect(p.lessonState, LessonProgressState.inProgress);
+      expect(p.isCompleted, isFalse);
+    });
+
+    test('three accumulated attempts 3+4+5 derive Completed at 10 stars', () {
+      var p = LessonProgress.initial(targetId)
+          .applyEvaluationResult(evaluated(3))
+          .applyEvaluationResult(evaluated(4))
+          .applyEvaluationResult(evaluated(5));
+      expect(p.stars, 10);
+      expect(p.lessonState, LessonProgressState.completed);
+      expect(p.lessonState.label, 'Completed');
+    });
+
+    test('an at-capacity lesson stays Completed', () {
+      var p = LessonProgress.initial(targetId)
+          .applyEvaluationResult(evaluated(5))
+          .applyEvaluationResult(evaluated(5))
+          .applyEvaluationResult(evaluated(5));
+      expect(p.stars, 10);
+      expect(p.lessonState, LessonProgressState.completed);
+    });
+
     test('validation rejects out-of-range fields', () {
       expect(
         () => LessonProgress(targetId: targetId, stars: -1, attemptCount: 0),
