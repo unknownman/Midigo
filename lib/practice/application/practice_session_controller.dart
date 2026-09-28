@@ -18,6 +18,8 @@ import '../domain/practice_clock.dart';
 import '../domain/practice_interaction.dart';
 import '../domain/practice_item.dart';
 import 'evaluation_flow.dart';
+import 'evidence_aggregation_service.dart';
+import 'evidence_store.dart';
 import 'lesson_progress.dart';
 import 'lesson_progress_service.dart';
 import 'practice_runtime.dart';
@@ -170,7 +172,13 @@ class PracticeSessionController {
     required this.clock,
     required this.targetProvider,
     this.recordLessonProgress = true,
+    EvidenceAggregator? evidenceAggregator,
   })  : _runtime = PracticeRuntime(clock: clock),
+        evidence = evidenceAggregator ??
+            PracticeEvidenceAggregator(
+              store: InMemoryEvidenceStore(),
+              clock: clock,
+            ),
         session = ValueNotifier<PracticeSessionSnapshot>(
             PracticeSessionSnapshot.forTarget(targetProvider())) {
     // The MIDI event stream is created exactly once per controller and shared
@@ -203,6 +211,14 @@ class PracticeSessionController {
   /// mastery (Review Scheduler Contract §26/§27). The provided
   /// [LessonProgressService] is then used read-only ([loadProgress]).
   final bool recordLessonProgress;
+
+  /// The Evidence Aggregation boundary of this session.
+  ///
+  /// Evidence is created at the attempt/evaluation boundary (see
+  /// [_runCompletion]) and nowhere else: no view, screen, or widget owns it.
+  /// Application code may read the aggregated state; the learner-facing UI
+  /// never does.
+  final EvidenceAggregator evidence;
 
   final PracticeRuntime _runtime;
   late final MidiEventStream _events;
@@ -449,7 +465,13 @@ class PracticeSessionController {
   }
 
   /// Runs one completion end to end: stop capture, evaluate from the frozen
-  /// pipeline, complete the attempt, record progress, refresh the snapshot.
+  /// pipeline, complete the attempt, record evidence and progress, refresh the
+  /// snapshot.
+  ///
+  /// The order is contractual: capture stops strictly before evaluation reads
+  /// the buffer, and evidence is created only after the attempt actually
+  /// carries the frozen result. Evidence is a projection of that result - it
+  /// never feeds back into evaluation, lesson progress, or scheduling.
   Future<void> _runCompletion() async {
     final target = targetProvider();
     final attempt = _runtime.currentItems.first.attempts.last;
@@ -460,7 +482,11 @@ class PracticeSessionController {
       sessionId: connection.currentSession!.sessionId,
       events: _capture.buffer.events,
     );
-    _runtime.completeAttempt(attemptId: attempt.id, result: flow.result);
+    final completed = _runtime.completeAttempt(
+      attemptId: attempt.id,
+      result: flow.result,
+    );
+    _recordEvidence(completed, flow);
     if (recordLessonProgress) {
       await progressService.recordResult(
         targetId: target.targetId,
@@ -469,6 +495,22 @@ class PracticeSessionController {
     }
     await _refresh(attemptInProgress: false);
     _resetLiveProjection();
+  }
+
+  /// Hands one completed attempt and its evaluation provenance to the Evidence
+  /// layer. This is the single Evidence creation point of the app; it runs on
+  /// the Start path, the lesson path, and the Review path alike, because the
+  /// semantic source is always the practice attempt.
+  void _recordEvidence(Attempt attempt, EvaluationFlowResult flow) {
+    final interaction = _runtime.currentInteraction;
+    if (interaction == null) {
+      return;
+    }
+    evidence.recordAttempt(
+      attempt: attempt,
+      interaction: interaction,
+      evaluation: flow,
+    );
   }
 
   /// Abandons the current attempt and the open interaction.
@@ -480,7 +522,11 @@ class PracticeSessionController {
       final attempt = _runtime.currentItems.first.attempts.last;
       _runtime.abandonAttempt(attempt.id);
     }
-    _runtime.endInteraction(reason: PracticeInteractionEndReason.abandoned);
+    // Ending an interaction is what supplies EVG-019's second gap operand for
+    // every contribution it produced, so it is reported to Evidence here.
+    evidence.recordInteractionEnd(
+      _runtime.endInteraction(reason: PracticeInteractionEndReason.abandoned),
+    );
     _interactionStarted = false;
     await _capture.stop();
     await _refresh(attemptInProgress: false);

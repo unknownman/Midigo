@@ -10,6 +10,60 @@ import '../../midi/domain/evaluation_result.dart';
 import '../../midi/domain/expected_musical_target.dart';
 import '../../midi/domain/raw_midi_event.dart';
 
+/// The identity/version vocabulary the frozen canonical input already carries,
+/// propagated unchanged out of the evaluation flow.
+///
+/// Nothing here is computed by this layer: every value is read straight off the
+/// canonical [EvaluationInput] the flow already builds, following the existing
+/// mechanical propagation convention. Downstream layers (Evidence v1.1,
+/// EVG-014) reuse this vocabulary verbatim instead of re-deriving it.
+class EvaluationProvenance {
+  final String evaluationProfileId;
+  final String evaluationProfileVersion;
+  final String alignmentAlgorithmVersion;
+  final String observationExtractionAlgorithmVersion;
+  final String preparationAlgorithmVersion;
+
+  /// The application-boundary composition version of this flow
+  /// ([EvaluationFlowService.algorithmVersion]).
+  final String flowAlgorithmVersion;
+
+  const EvaluationProvenance({
+    required this.evaluationProfileId,
+    required this.evaluationProfileVersion,
+    required this.alignmentAlgorithmVersion,
+    required this.observationExtractionAlgorithmVersion,
+    required this.preparationAlgorithmVersion,
+    required this.flowAlgorithmVersion,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EvaluationProvenance &&
+          other.evaluationProfileId == evaluationProfileId &&
+          other.evaluationProfileVersion == evaluationProfileVersion &&
+          other.alignmentAlgorithmVersion == alignmentAlgorithmVersion &&
+          other.observationExtractionAlgorithmVersion ==
+              observationExtractionAlgorithmVersion &&
+          other.preparationAlgorithmVersion == preparationAlgorithmVersion &&
+          other.flowAlgorithmVersion == flowAlgorithmVersion;
+
+  @override
+  int get hashCode => Object.hash(
+        evaluationProfileId,
+        evaluationProfileVersion,
+        alignmentAlgorithmVersion,
+        observationExtractionAlgorithmVersion,
+        preparationAlgorithmVersion,
+        flowAlgorithmVersion,
+      );
+
+  @override
+  String toString() => 'EvaluationProvenance($evaluationProfileId '
+      '$evaluationProfileVersion)';
+}
+
 /// Outcome of one evaluation flow run: the frozen [EvaluationResult] plus the
 /// provenance that identifies which target/session produced it.
 class EvaluationFlowResult {
@@ -23,11 +77,16 @@ class EvaluationFlowResult {
 
   final TargetMode mode;
 
+  /// Identity and algorithm versions propagated verbatim from the canonical
+  /// input this run produced.
+  final EvaluationProvenance provenance;
+
   EvaluationFlowResult({
     required this.result,
     required this.targetId,
     required this.sessionId,
     required this.mode,
+    required this.provenance,
   });
 
   bool get isEvaluated => result.isEvaluated;
@@ -106,6 +165,15 @@ final class EvaluationFlowService {
       targetId: target.targetId,
       sessionId: sessionId,
       mode: target.mode,
+      provenance: EvaluationProvenance(
+        evaluationProfileId: input.evaluationProfileId,
+        evaluationProfileVersion: input.evaluationProfileVersion,
+        alignmentAlgorithmVersion: input.alignmentAlgorithmVersion,
+        observationExtractionAlgorithmVersion:
+            input.observationExtractionAlgorithmVersion,
+        preparationAlgorithmVersion: input.preparationAlgorithmVersion,
+        flowAlgorithmVersion: algorithmVersion,
+      ),
     );
   }
 }
