@@ -18,12 +18,14 @@ void main() {
     connection = FakeConnection();
     stream = FakeMidiStream();
     store = InMemoryLessonProgressStore();
+    final clock = FakeClock(DateTime(2025, 1, 1, 9, 0, 0));
     return MidiTutorApp(
       discovery: FakeDiscovery(),
       connection: connection,
       captureFactory: () => stream,
       progressStore: store,
-      clock: FakeClock(DateTime(2025, 1, 1, 9, 0, 0)),
+      reviewScheduler: newFakeReviewScheduler(clock),
+      clock: clock,
     );
   }
 

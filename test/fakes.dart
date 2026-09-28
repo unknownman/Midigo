@@ -9,6 +9,10 @@ import 'package:miditutor/midi/domain/midi_connection_state.dart';
 import 'package:miditutor/midi/domain/midi_source_info.dart';
 import 'package:miditutor/midi/domain/raw_midi_event.dart';
 import 'package:miditutor/practice/application/in_memory_lesson_progress_store.dart';
+import 'package:miditutor/practice/application/in_memory_review_schedule_store.dart';
+import 'package:miditutor/practice/application/learning_catalog.dart';
+import 'package:miditutor/practice/application/review_scheduler.dart';
+import 'package:miditutor/practice/application/spaced_review_scheduler.dart';
 import 'package:miditutor/practice/domain/practice_clock.dart';
 
 const kFakeSource = MidiSourceInfo(
@@ -121,6 +125,20 @@ class FakeMidiStream implements MidiEventStream {
     pushNoteOff(5, 1060, 67);
   }
 
+  /// A perfect one-at-a-time C-major arpeggio: C E G C5 rose in order with a
+  /// 250 ms step (the frozen expected arpeggio onsets), each note released
+  /// just before the next begins.
+  void pushPerfectCMajorArpeggio() {
+    pushNoteOn(0, 1000, 60);
+    pushNoteOn(1, 1250, 64);
+    pushNoteOn(2, 1500, 67);
+    pushNoteOn(3, 1750, 72);
+    pushNoteOff(4, 1240, 60);
+    pushNoteOff(5, 1490, 64);
+    pushNoteOff(6, 1740, 67);
+    pushNoteOff(7, 2000, 72);
+  }
+
   /// A visually messy but definite performance: one real target note plus
   /// off-by-one neighbours and a late extra - evaluated as 0 stars, not NEP.
   void pushMessyCMajorBlock() {
@@ -154,4 +172,27 @@ class FakeClock implements PracticeClock {
 
 class FakeProgressStore extends InMemoryLessonProgressStore {
   FakeProgressStore();
+}
+
+/// In-memory scheduler in the deterministic catalog skill order, sharing the
+/// injected practice clock (tests never touch the JSON review store on disk).
+SpacedReviewScheduler newFakeReviewScheduler(FakeClock clock) =>
+    SpacedReviewScheduler(
+      store: InMemoryReviewScheduleStore(),
+      clock: clock,
+      orderedSkillIds: List<String>.unmodifiable(
+        [for (final lesson in LearningCatalog.allLessons) lesson.targetId],
+      ),
+    );
+
+/// Registers [skillIds] as eligible and advances [clock] so they are all due.
+Future<void> makeReviewsReady(
+  ReviewScheduler scheduler,
+  FakeClock clock, {
+  required List<String> skillIds,
+}) async {
+  for (final skillId in skillIds) {
+    await scheduler.registerEligibleSkill(skillId);
+  }
+  clock.current = clock.current.add(const Duration(days: 2));
 }

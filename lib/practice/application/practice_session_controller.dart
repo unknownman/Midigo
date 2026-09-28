@@ -169,6 +169,7 @@ class PracticeSessionController {
     required this.progressService,
     required this.clock,
     required this.targetProvider,
+    this.recordLessonProgress = true,
   })  : _runtime = PracticeRuntime(clock: clock),
         session = ValueNotifier<PracticeSessionSnapshot>(
             PracticeSessionSnapshot.forTarget(targetProvider())) {
@@ -194,6 +195,14 @@ class PracticeSessionController {
   final LessonProgressService progressService;
   final PracticeClock clock;
   final ExpectedMusicalTarget Function() targetProvider;
+
+  /// Whether completing an attempt ends with the frozen evaluation result being
+  /// recorded into lesson progress (the `Start` path).
+  ///
+  /// Review sessions pass `false`: they must not modify lesson progress or
+  /// mastery (Review Scheduler Contract §26/§27). The provided
+  /// [LessonProgressService] is then used read-only ([loadProgress]).
+  final bool recordLessonProgress;
 
   final PracticeRuntime _runtime;
   late final MidiEventStream _events;
@@ -452,10 +461,12 @@ class PracticeSessionController {
       events: _capture.buffer.events,
     );
     _runtime.completeAttempt(attemptId: attempt.id, result: flow.result);
-    await progressService.recordResult(
-      targetId: target.targetId,
-      result: flow.result,
-    );
+    if (recordLessonProgress) {
+      await progressService.recordResult(
+        targetId: target.targetId,
+        result: flow.result,
+      );
+    }
     await _refresh(attemptInProgress: false);
     _resetLiveProjection();
   }

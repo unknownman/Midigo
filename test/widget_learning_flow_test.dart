@@ -20,12 +20,14 @@ void main() {
     connection = injectedConnection ?? FakeConnection();
     stream = FakeMidiStream();
     store = InMemoryLessonProgressStore();
+    final clock = FakeClock(DateTime(2025, 1, 1, 9, 0, 0));
     return MidiTutorApp(
       discovery: FakeDiscovery(),
       connection: connection,
       captureFactory: () => stream,
       progressStore: store,
-      clock: FakeClock(DateTime(2025, 1, 1, 9, 0, 0)),
+      reviewScheduler: newFakeReviewScheduler(clock),
+      clock: clock,
     );
   }
 
@@ -287,12 +289,14 @@ void main() {
     // A full reload re-reads the same persisted store: still Completed.
     await tester.pageBack();
     await tester.pumpAndSettle();
+    final reloadClock = FakeClock(DateTime(2025, 1, 1, 9, 0, 0));
     await tester.pumpWidget(MidiTutorApp(
       discovery: FakeDiscovery(),
       connection: FakeConnection(),
       captureFactory: () => FakeMidiStream(),
       progressStore: store,
-      clock: FakeClock(DateTime(2025, 1, 1, 9, 0, 0)),
+      reviewScheduler: newFakeReviewScheduler(reloadClock),
+      clock: reloadClock,
     ));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Learning Path'));

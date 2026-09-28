@@ -17,12 +17,14 @@ void main() {
 
   Widget app() {
     store = InMemoryLessonProgressStore();
+    final clock = FakeClock(DateTime(2025, 1, 1, 9, 0, 0));
     return MidiTutorApp(
       discovery: FakeDiscovery(),
       connection: FakeConnection(),
       captureFactory: FakeMidiStream.new,
       progressStore: store,
-      clock: FakeClock(DateTime(2025, 1, 1, 9, 0, 0)),
+      reviewScheduler: newFakeReviewScheduler(clock),
+      clock: clock,
     );
   }
 

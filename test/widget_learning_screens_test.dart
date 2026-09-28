@@ -11,12 +11,14 @@ Widget _app({
   FakeConnection? connection,
   FakeMidiStream? stream,
 }) {
+  final clock = FakeClock(DateTime(2025, 1, 1, 9, 0, 0));
   return MidiTutorApp(
     discovery: discovery ?? FakeDiscovery(),
     connection: connection ?? FakeConnection(),
     captureFactory: () => stream ?? FakeMidiStream(),
     progressStore: InMemoryLessonProgressStore(),
-    clock: FakeClock(DateTime(2025, 1, 1, 9, 0, 0)),
+    reviewScheduler: newFakeReviewScheduler(clock),
+    clock: clock,
   );
 }
 
@@ -41,7 +43,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Review'), findsOneWidget);
-    expect(find.text('No reviews due'), findsOneWidget);
+    expect(find.text("You're all caught up."), findsOneWidget);
   });
 
   testWidgets('learning path renders the C Major lesson', (WidgetTester tester) async {

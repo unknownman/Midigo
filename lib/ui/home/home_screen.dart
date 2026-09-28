@@ -8,6 +8,7 @@ import '../../midi/application/raw_midi_export_sink.dart';
 import '../../practice/application/learning_catalog.dart';
 import '../../practice/application/learning_path_service.dart';
 import '../../practice/application/lesson_progress_service.dart';
+import '../../practice/application/review_scheduler.dart';
 import '../../practice/domain/learning_path.dart';
 import '../../practice/domain/practice_clock.dart';
 import '../learning_path/learning_path_screen.dart';
@@ -21,6 +22,7 @@ class HomeScreen extends StatelessWidget {
     required this.connection,
     required this.captureFactory,
     required this.progressService,
+    required this.reviewScheduler,
     required this.clock,
     this.exportSink,
   });
@@ -30,6 +32,7 @@ class HomeScreen extends StatelessWidget {
   final MidiDeviceConnection connection;
   final MidiEventStream Function() captureFactory;
   final LessonProgressService progressService;
+  final ReviewScheduler reviewScheduler;
   final PracticeClock clock;
   final RawMidiExportSink? exportSink;
 
@@ -72,23 +75,83 @@ class HomeScreen extends StatelessWidget {
             clock: clock,
           ),
           const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.event_note),
-              title: const Text('Review'),
-              subtitle: const Text('No reviews due'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const ReviewScreen(),
-                  ),
-                );
-              },
-            ),
+          _ReviewCard(
+            catalog: catalog,
+            discovery: discovery,
+            connection: connection,
+            captureFactory: captureFactory,
+            progressService: progressService,
+            reviewScheduler: reviewScheduler,
+            clock: clock,
+            exportSink: exportSink,
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Home "Review" entry point. Shows whether reviews are due and opens the
+/// Review Hub, where every review-related action (Review / Start / Lesson /
+/// Skip for Now / Start All) is handled.
+class _ReviewCard extends StatelessWidget {
+  const _ReviewCard({
+    required this.catalog,
+    required this.discovery,
+    required this.connection,
+    required this.captureFactory,
+    required this.progressService,
+    required this.reviewScheduler,
+    required this.clock,
+    this.exportSink,
+  });
+
+  final LearningCatalog catalog;
+  final MidiDeviceDiscovery discovery;
+  final MidiDeviceConnection connection;
+  final MidiEventStream Function() captureFactory;
+  final LessonProgressService progressService;
+  final ReviewScheduler reviewScheduler;
+  final PracticeClock clock;
+  final RawMidiExportSink? exportSink;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<ReviewItem>>(
+      future: reviewScheduler.getReadyReviews(),
+      builder: (context, snapshot) {
+        final ready = snapshot.data;
+        final count = ready?.length;
+        final subtitle = switch (count) {
+          null => 'Loading…',
+          > 0 => '$count ready',
+          _ => 'No reviews due',
+        };
+        return Card(
+          child: ListTile(
+            leading: const Icon(Icons.event_note),
+            title: const Text('Review'),
+            subtitle: Text(subtitle),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ReviewScreen(
+                    catalog: catalog,
+                    discovery: discovery,
+                    connection: connection,
+                    captureFactory: captureFactory,
+                    progressService: progressService,
+                    reviewScheduler: reviewScheduler,
+                    clock: clock,
+                    exportSink: exportSink,
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

@@ -120,6 +120,19 @@ final class LearningCatalog {
     return null;
   }
 
+  /// The lesson whose exercise target is [targetId], or null when unknown.
+  ///
+  /// Review items are keyed by skill (= exercise target) id; this is the
+  /// catalog-owned route back to the lesson" its title/subtitle and form.
+  LearningLesson? lessonByTargetId(String targetId) {
+    for (final lesson in allLessons) {
+      if (lesson.targetId == targetId) {
+        return lesson;
+      }
+    }
+    return null;
+  }
+
   /// The lesson that follows [id] in the catalog, or null when unknown/last.
   LearningLesson? nextLessonAfter(String id) {
     for (var i = 0; i < allLessons.length; i++) {
