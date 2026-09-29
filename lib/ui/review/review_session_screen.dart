@@ -94,6 +94,11 @@ class _ReviewSessionScreenState extends State<ReviewSessionScreen> {
   /// Commits exactly one scheduler response for the current item, then moves
   /// on. [reviewResponseFor] maps the frozen result: 3+ stars -> successful,
   /// 0..2 -> unsuccessful, NEP/abandoned -> null (never reach the scheduler).
+  ///
+  /// This is also the completion boundary of the review practice interaction:
+  /// Review is ordinary practice against the same Practice Runtime, so it uses
+  /// the same interaction-end path as the Start/lesson flows - there is no
+  /// Review-specific lifecycle here.
   Future<void> _commitAndAdvance() async {
     if (_committing) {
       return;
@@ -106,6 +111,7 @@ class _ReviewSessionScreenState extends State<ReviewSessionScreen> {
     final response = reviewResponseFor(
       controller.session.value.latestCompletedResult,
     );
+    controller.completeInteraction();
     if (response != null) {
       await widget.reviewScheduler.recordReviewResponse(_skillId, response);
     }

@@ -162,6 +162,11 @@ class PracticeSessionSnapshot {
 /// [EvaluationFlowService], and [LessonProgressService]. UI never touches
 /// `EvaluationEngine` / `RawMidiEvent` / CoreMIDI - it only consumes the
 /// [session] snapshot and the learner-facing methods on this controller.
+///
+/// It is also the only place that drives the Practice Interaction lifecycle to
+/// an end ([completeInteraction] / [abandonAttempt] -> [_endInteraction]) and
+/// the only place that reports that end to the Evidence temporal layer. Screens
+/// invoke a lifecycle command; they never learn the temporal semantics.
 class PracticeSessionController {
   PracticeSessionController({
     required this.discovery,
@@ -216,8 +221,9 @@ class PracticeSessionController {
   ///
   /// Evidence is created at the attempt/evaluation boundary (see
   /// [_runCompletion]) and nowhere else: no view, screen, or widget owns it.
-  /// Application code may read the aggregated state; the learner-facing UI
-  /// never does.
+  /// The Practice Interaction's end is reported here too, and only from the
+  /// runtime lifecycle ([_endInteraction]) - never from a screen. Application
+  /// code may read the aggregated state; the learner-facing UI never does.
   final EvidenceAggregator evidence;
 
   final PracticeRuntime _runtime;
@@ -245,6 +251,24 @@ class PracticeSessionController {
   final ValueNotifier<PracticeSessionSnapshot> session;
 
   bool _interactionStarted = false;
+
+  /// How many Practice Interactions this session has opened.
+  ///
+  /// One Practice Interaction is one learner-facing practice engagement (RT-002)
+  /// and its identity is deterministic, never random and never wall-clock
+  /// (RT-003/RT-020). This ordinal is the same deterministic sequencing the
+  /// runtime already uses for attempt ids: it makes a *second* engagement of the
+  /// same target a genuinely different interaction instead of a second use of
+  /// the first one's id, so the 15-minute independence rule of EVG-007/008/019
+  /// stays expressible in the app.
+  int _interactionOrdinal = 0;
+
+  /// Deterministic id of the next Practice Interaction opened for [targetId].
+  ///
+  /// The first engagement of a session keeps the plain target-derived id.
+  String _interactionIdFor(String targetId) => _interactionOrdinal == 1
+      ? 'pi-$targetId'
+      : 'pi-$targetId-$_interactionOrdinal';
 
   /// Guards against overlapping completions of the same active attempt.
   ///
@@ -424,8 +448,9 @@ class PracticeSessionController {
     _resetLiveProjection();
 
     if (!_runtime.hasOpenInteraction) {
+      _interactionOrdinal += 1;
       _runtime.createInteraction(
-        interactionId: 'pi-${target.targetId}',
+        interactionId: _interactionIdFor(target.targetId),
         exercises: <ExerciseInstance>[exercise],
       );
     }
@@ -513,6 +538,46 @@ class PracticeSessionController {
     );
   }
 
+  /// Ends the open practice interaction because the learner completed it.
+  ///
+  /// This is the normal completion boundary of a practice engagement (the
+  /// Result screen's Continue action: the learner finished every focus item of
+  /// the interaction and left it). Ending an interaction is what supplies
+  /// EVG-019's second gap operand - `earlierInteraction.ended_at` - so a
+  /// *completed* interaction stops counting as "still open" and a later
+  /// interaction can be classified independent once the 15-minute boundary is
+  /// crossed (EVG-008).
+  ///
+  /// Nothing stored is rewritten: the end is reported to Evidence, which holds
+  /// it as its own immutable interaction window, exactly as the abandon path
+  /// does (EVG-021). A retry is not a completion, so a retried interaction
+  /// deliberately stays open and its attempts stay dependent with each other.
+  ///
+  /// Synchronous by design: the runtime stamps the end from the injected
+  /// [PracticeClock] (RT-004) and Evidence records the closed window, so there is
+  /// no asynchronous work to await. Calling it with no open interaction is a
+  /// no-op, never an error.
+  void completeInteraction() {
+    if (!_interactionStarted) {
+      return;
+    }
+    _endInteraction(PracticeInteractionEndReason.completed);
+  }
+
+  /// The single interaction-end path of this session.
+  ///
+  /// The Practice Runtime stamps `ended_at` from the practice clock (RT-004 /
+  /// RT-012: never MIDI capture time, never the evaluation layer) and the closed
+  /// interaction is reported to Evidence, which keeps it as its own immutable
+  /// interaction window rather than back-writing any contribution
+  /// (EVG-019/EVG-021). Completion and abandonment share it, so neither can
+  /// drift from the other's temporal semantics.
+  void _endInteraction(PracticeInteractionEndReason reason) {
+    final interaction = _runtime.endInteraction(reason: reason);
+    _interactionStarted = false;
+    evidence.recordInteractionEnd(interaction);
+  }
+
   /// Abandons the current attempt and the open interaction.
   Future<void> abandonAttempt() async {
     if (!_interactionStarted) {
@@ -524,10 +589,7 @@ class PracticeSessionController {
     }
     // Ending an interaction is what supplies EVG-019's second gap operand for
     // every contribution it produced, so it is reported to Evidence here.
-    evidence.recordInteractionEnd(
-      _runtime.endInteraction(reason: PracticeInteractionEndReason.abandoned),
-    );
-    _interactionStarted = false;
+    _endInteraction(PracticeInteractionEndReason.abandoned);
     await _capture.stop();
     await _refresh(attemptInProgress: false);
     _resetLiveProjection();

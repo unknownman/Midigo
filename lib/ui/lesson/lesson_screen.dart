@@ -136,9 +136,15 @@ class _LessonScreenState extends State<LessonScreen> {
     });
   }
 
-  /// Continues: opens the next lesson when it became available, otherwise
-  /// returns to the Learning Path. Only reachable once the sequence completes.
+  /// Continues: closes the finished practice interaction, then opens the next
+  /// lesson when it became available, otherwise returns to the Learning Path.
+  /// Only reachable once the sequence completes.
+  ///
+  /// Closing the interaction is the completion boundary of the practice
+  /// engagement; the controller decides what that means for the runtime
+  /// lifecycle, so this screen stays free of any temporal/evidence vocabulary.
   Future<void> _continue() async {
+    _ensureController.completeInteraction();
     await _ensureController.disconnect();
     if (!mounted) {
       return;

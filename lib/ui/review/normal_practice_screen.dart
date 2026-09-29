@@ -81,7 +81,10 @@ class _NormalPracticeScreenState extends State<NormalPracticeScreen> {
     _stage.value = _NormalStage.practice;
   }
 
+  /// Closes the finished practice interaction (the controller owns what that
+  /// means for the runtime lifecycle) and leaves the session.
   Future<void> _continue() async {
+    _controller.completeInteraction();
     await _controller.disconnect();
     if (mounted) {
       Navigator.of(context).pop();
