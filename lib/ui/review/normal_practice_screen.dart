@@ -8,9 +8,11 @@ import '../../practice/application/fingering_data.dart';
 import '../../practice/application/learning_catalog.dart';
 import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/lesson_progress_service.dart';
+import '../../practice/application/practice_sequence_catalog.dart';
 import '../../practice/application/practice_session_controller.dart';
 import '../../practice/domain/learning_lesson.dart';
 import '../../practice/domain/practice_clock.dart';
+import '../../practice/domain/practice_exercise.dart';
 import '../lesson/practice_view.dart';
 import '../lesson/result_view.dart';
 
@@ -48,11 +50,20 @@ class NormalPracticeScreen extends StatefulWidget {
 class _NormalPracticeScreenState extends State<NormalPracticeScreen> {
   final ValueNotifier<_NormalStage> _stage =
       ValueNotifier<_NormalStage>(_NormalStage.practice);
+
+  /// The canonical curriculum exercise this session executes, resolved once
+  /// from the lesson's Practice Sequence (N = 1 today) so the screen has no
+  /// independent target-id -> execution path of its own.
+  late final PracticeExercise _exercise;
   late final PracticeSessionController _controller;
 
   @override
   void initState() {
     super.initState();
+    _exercise = PracticeSequenceCatalog(widget.catalog)
+        .sequenceFor(widget.lesson)
+        .exercises
+        .first;
     _controller = PracticeSessionController(
       discovery: widget.discovery,
       connection: widget.connection,
@@ -60,8 +71,8 @@ class _NormalPracticeScreenState extends State<NormalPracticeScreen> {
       evaluation: const EvaluationFlowService(),
       progressService: widget.progressService,
       clock: widget.clock,
-      targetProvider: () =>
-          widget.catalog.buildTargetForTargetId(widget.lesson.targetId),
+      exercise: _exercise,
+      targetFactory: widget.catalog.buildTargetForTargetId,
     );
   }
 
@@ -93,7 +104,7 @@ class _NormalPracticeScreenState extends State<NormalPracticeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final target = widget.catalog.buildTargetForTargetId(widget.lesson.targetId);
+    final target = widget.catalog.buildTargetForTargetId(_exercise.targetId);
     final instruction = LessonInstructionFactory().build(
       target: target,
       fingerings: const FingeringCatalog().fingeringsFor(widget.lesson.targetId),

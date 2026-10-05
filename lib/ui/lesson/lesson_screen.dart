@@ -80,8 +80,8 @@ class _LessonScreenState extends State<LessonScreen> {
       evaluation: const EvaluationFlowService(),
       progressService: widget.progressService,
       clock: widget.clock,
-      targetProvider: () =>
-          widget.catalog.buildTargetForTargetId(exercise.targetId),
+      exercise: exercise,
+      targetFactory: widget.catalog.buildTargetForTargetId,
     );
     _session = fresh;
     _sessionExerciseId = exercise.id;

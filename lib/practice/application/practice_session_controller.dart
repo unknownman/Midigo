@@ -15,6 +15,7 @@ import '../../midi/domain/raw_midi_event.dart';
 import '../domain/attempt.dart';
 import '../domain/exercise_instance.dart';
 import '../domain/practice_clock.dart';
+import '../domain/practice_exercise.dart';
 import '../domain/practice_interaction.dart';
 import '../domain/practice_item.dart';
 import 'evaluation_flow.dart';
@@ -175,7 +176,8 @@ class PracticeSessionController {
     required this.evaluation,
     required this.progressService,
     required this.clock,
-    required this.targetProvider,
+    required this.exercise,
+    required this.targetFactory,
     this.recordLessonProgress = true,
     EvidenceAggregator? evidenceAggregator,
   })  : _runtime = PracticeRuntime(clock: clock),
@@ -185,7 +187,8 @@ class PracticeSessionController {
               clock: clock,
             ),
         session = ValueNotifier<PracticeSessionSnapshot>(
-            PracticeSessionSnapshot.forTarget(targetProvider())) {
+            PracticeSessionSnapshot.forTarget(
+                targetFactory(exercise.targetId))) {
     // The MIDI event stream is created exactly once per controller and shared
     // by both the capture (per-attempt buffering) and the live projection.
     _events = captureFactory();
@@ -207,7 +210,29 @@ class PracticeSessionController {
   final EvaluationFlowService evaluation;
   final LessonProgressService progressService;
   final PracticeClock clock;
-  final ExpectedMusicalTarget Function() targetProvider;
+
+  /// The canonical curriculum exercise this session executes.
+  ///
+  /// This is the single execution input of a practice session: the selected
+  /// [PracticeExercise] of the lesson's Practice Sequence (or the review
+  /// exercise resolved for the due target). Everything the runtime executes -
+  /// the [ExerciseInstance], the evaluation target, the progress target and the
+  /// learner-facing description - is derived from this one exercise, so the
+  /// controller can never execute a curriculum exercise it was not given.
+  final PracticeExercise exercise;
+
+  /// Resolves a curriculum target id to its frozen [ExpectedMusicalTarget].
+  ///
+  /// The controller deliberately holds only this narrow resolution seam rather
+  /// than a whole catalog: it may materialize the target an
+  /// [ExerciseInstance] needs, but it may only ever ask for
+  /// [PracticeExercise.targetId], so the target always belongs to the selected
+  /// exercise.
+  final ExpectedMusicalTarget Function(String targetId) targetFactory;
+
+  /// The frozen expected target of [exercise], resolved once per read through
+  /// [targetFactory].
+  ExpectedMusicalTarget get _target => targetFactory(exercise.targetId);
 
   /// Whether completing an attempt ends with the frozen evaluation result being
   /// recorded into lesson progress (the `Start` path).
@@ -439,19 +464,16 @@ class PracticeSessionController {
       );
       return;
     }
-    final target = targetProvider();
-    final exercise = ExerciseInstance(
-      id: 'exercise-${target.targetId}',
-      expectedTarget: target,
-    );
+    final exerciseInstance =
+        ExerciseInstance.fromExercise(exercise: exercise, target: _target);
 
     _resetLiveProjection();
 
     if (!_runtime.hasOpenInteraction) {
       _interactionOrdinal += 1;
       _runtime.createInteraction(
-        interactionId: _interactionIdFor(target.targetId),
-        exercises: <ExerciseInstance>[exercise],
+        interactionId: _interactionIdFor(exercise.targetId),
+        exercises: <ExerciseInstance>[exerciseInstance],
       );
     }
     _runtime.armAttempt(itemId: _firstItemId());
@@ -498,7 +520,7 @@ class PracticeSessionController {
   /// carries the frozen result. Evidence is a projection of that result - it
   /// never feeds back into evaluation, lesson progress, or scheduling.
   Future<void> _runCompletion() async {
-    final target = targetProvider();
+    final target = _target;
     final attempt = _runtime.currentItems.first.attempts.last;
     _runtime.activateAttempt(attempt.id);
     await _capture.stop();
@@ -613,12 +635,12 @@ class PracticeSessionController {
   }
 
   Future<LessonProgress> _currentProgress() async {
-    final target = targetProvider();
+    final target = _target;
     return await progressService.loadProgress(target.targetId);
   }
 
   Future<void> _refresh({required bool attemptInProgress}) async {
-    final target = targetProvider();
+    final target = _target;
     final progress = await _currentProgress();
     final items = _runtime.currentItems;
     session.value = session.value.copyWith(

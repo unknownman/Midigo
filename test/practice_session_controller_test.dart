@@ -19,6 +19,7 @@ import 'package:miditutor/practice/application/practice_session_controller.dart'
 import 'package:miditutor/practice/application/slice1_catalog.dart';
 import 'package:miditutor/practice/domain/attempt.dart';
 import 'package:miditutor/practice/domain/practice_clock.dart';
+import 'package:miditutor/practice/domain/practice_exercise.dart';
 import 'package:miditutor/practice/domain/practice_interaction.dart';
 
 final class _FakeClock implements PracticeClock {
@@ -142,6 +143,14 @@ void main() {
     targetId: 'major-c-rh-block',
   );
 
+  /// The canonical curriculum exercise this session executes (H2.11A).
+  final exercise = PracticeExercise(
+    id: 'lesson-major-c-rh-block.exercise.01',
+    order: 1,
+    title: 'Guided Block Practice',
+    targetId: 'major-c-rh-block',
+  );
+
   late _FakeDiscovery discovery;
   late _FakeConnection connection;
   late _FakeMidiStream stream;
@@ -163,7 +172,8 @@ void main() {
       evaluation: const EvaluationFlowService(),
       progressService: LessonProgressService(store: store),
       clock: clock,
-      targetProvider: () => target,
+      exercise: exercise,
+      targetFactory: (targetId) => target,
     );
     return controller;
   }

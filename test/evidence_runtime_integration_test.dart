@@ -10,6 +10,7 @@ import 'package:miditutor/practice/application/practice_session_controller.dart'
 import 'package:miditutor/practice/application/review_scheduler.dart';
 import 'package:miditutor/practice/domain/attempt.dart';
 import 'package:miditutor/practice/domain/evidence.dart';
+import 'package:miditutor/practice/domain/practice_exercise.dart';
 
 import 'fakes.dart';
 
@@ -26,6 +27,14 @@ void main() {
     root: TargetRoot.c,
     hand: TargetHand.right,
     mode: TargetMode.block,
+    targetId: targetId,
+  );
+
+  /// The canonical curriculum exercise this session executes (H2.11A).
+  final exercise = PracticeExercise(
+    id: 'lesson-major-c-rh-block.exercise.01',
+    order: 1,
+    title: 'Guided Block Practice',
     targetId: targetId,
   );
 
@@ -52,7 +61,8 @@ void main() {
       evaluation: const EvaluationFlowService(),
       progressService: progressService,
       clock: clock,
-      targetProvider: () => target,
+      exercise: exercise,
+      targetFactory: (targetId) => target,
       recordLessonProgress: recordLessonProgress,
     );
   }

@@ -9,6 +9,7 @@ import '../../practice/application/fingering_data.dart';
 import '../../practice/application/learning_catalog.dart';
 import '../../practice/application/lesson_instruction.dart';
 import '../../practice/application/lesson_progress_service.dart';
+import '../../practice/application/practice_sequence_catalog.dart';
 import '../../practice/application/practice_session_controller.dart';
 import '../../practice/application/review_scheduler.dart';
 import '../../practice/domain/learning_lesson.dart';
@@ -79,7 +80,9 @@ class _ReviewSessionScreenState extends State<ReviewSessionScreen> {
       evaluation: const EvaluationFlowService(),
       progressService: widget.progressService,
       clock: widget.clock,
-      targetProvider: () => widget.catalog.buildTargetForTargetId(skillId),
+      exercise: PracticeSequenceCatalog(widget.catalog)
+          .exerciseForTargetId(skillId),
+      targetFactory: widget.catalog.buildTargetForTargetId,
       recordLessonProgress: false,
     );
   }

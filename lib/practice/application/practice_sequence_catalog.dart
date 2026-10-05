@@ -26,22 +26,52 @@ final class PracticeSequenceCatalog {
   ///
   /// By construction every catalog lesson is covered; unknown lesson ids throw
   /// a clear [StateError] instead of silently producing an empty sequence.
-  PracticeSequence sequenceFor(LearningLesson lesson) {
-    final target = catalog.buildTargetForTargetId(lesson.targetId);
+  PracticeSequence sequenceFor(LearningLesson lesson) =>
+      _sequenceFor(ownerId: lesson.id, targetId: lesson.targetId);
+
+  /// The canonical Practice Exercise a review of [targetId] executes.
+  ///
+  /// Review enters by target id rather than by lesson (the Review Scheduler
+  /// hands out due skill ids, not lesson ids), so this resolves the exercise
+  /// through the very same curriculum builder [sequenceFor] uses instead of
+  /// letting the review screen invent an execution input of its own. Review is
+  /// ordinary practice against the same exercise definition, so both routes
+  /// produce the same single-target, fully-guided, evaluated exercise.
+  ///
+  /// The id is deterministic and review-scoped (`review.<targetId>.exercise.01`)
+  /// because a review has no lesson to own it; it is never random and never
+  /// clock-derived.
+  PracticeExercise exerciseForTargetId(String targetId) =>
+      _exerciseFor(ownerId: 'review.$targetId', targetId: targetId);
+
+  PracticeSequence _sequenceFor({
+    required String ownerId,
+    required String targetId,
+  }) {
+    return PracticeSequence(
+      lessonId: ownerId,
+      exercises: <PracticeExercise>[
+        _exerciseFor(ownerId: ownerId, targetId: targetId),
+      ],
+    );
+  }
+
+  /// The one place a curriculum exercise is defined, shared by every route so
+  /// lesson practice and review can never drift into different exercises.
+  PracticeExercise _exerciseFor({
+    required String ownerId,
+    required String targetId,
+  }) {
+    final target = catalog.buildTargetForTargetId(targetId);
     final title = switch (target.mode) {
       TargetMode.block => 'Guided Block Practice',
       TargetMode.arpeggio => 'Guided Arpeggio Practice',
     };
-    return PracticeSequence(
-      lessonId: lesson.id,
-      exercises: <PracticeExercise>[
-        PracticeExercise(
-          id: '${lesson.id}.exercise.01',
-          order: 1,
-          title: title,
-          targetId: lesson.targetId,
-        ),
-      ],
+    return PracticeExercise(
+      id: '$ownerId.exercise.01',
+      order: 1,
+      title: title,
+      targetId: targetId,
     );
   }
 }
