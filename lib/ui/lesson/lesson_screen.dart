@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../midi/application/midi_device_connection.dart';
@@ -183,6 +185,20 @@ class _LessonScreenState extends State<LessonScreen> {
         '${snapshot.totalExercises} · ${snapshot.currentExercise.title}';
   }
 
+  /// A learner exit before Continue is an abandonment, never a completion.
+  ///
+  /// `PopScope` observes the platform/UI Back navigation without blocking it and
+  /// without owning any lifecycle logic: it only forwards the exit to the
+  /// controller, which decides what abandoning the engagement means (RT-009).
+  /// Leaving while a Practice Interaction is open therefore ends it `abandoned`;
+  /// the Continue path ends it `completed` and stays distinguishable. When no
+  /// session was ever built (Back from Teach) there is nothing to abandon.
+  void _handlePop(bool didPop) {
+    if (didPop) {
+      unawaited(_session?.abandonAttempt());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final teachTarget = widget.catalog.buildTarget(widget.lesson);
@@ -197,37 +213,40 @@ class _LessonScreenState extends State<LessonScreen> {
       fingerings:
           const FingeringCatalog().fingeringsFor(exerciseTarget.targetId),
     );
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.lesson.title)),
-      body: ValueListenableBuilder<_Stage>(
-        valueListenable: _stage,
-        builder: (context, stage, _) {
-          return switch (stage) {
-            _Stage.teach => TeachView(
-                lesson: widget.lesson,
-                instruction: teachInstruction,
-                steps: TeachSequence().build(
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, _) => _handlePop(didPop),
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.lesson.title)),
+        body: ValueListenableBuilder<_Stage>(
+          valueListenable: _stage,
+          builder: (context, stage, _) {
+            return switch (stage) {
+              _Stage.teach => TeachView(
                   lesson: widget.lesson,
                   instruction: teachInstruction,
+                  steps: TeachSequence().build(
+                    lesson: widget.lesson,
+                    instruction: teachInstruction,
+                  ),
+                  onStartPractice: _startPractice,
                 ),
-                onStartPractice: _startPractice,
-              ),
-            _Stage.practice => PracticeView(
-                controller: _ensureController,
-                instruction: exerciseInstruction,
-                onFinished: _toResult,
-                exerciseContext: _exerciseContext,
-              ),
-            _Stage.result => ResultView(
-                snapshot: _ensureController.session.value,
-                exerciseContext: _exerciseContext,
-                practiceComplete: _sequence.value.sequenceComplete,
-                canContinue: _sequence.value.sequenceComplete,
-                onRetry: _retry,
-                onContinue: _continue,
-              ),
-          };
-        },
+              _Stage.practice => PracticeView(
+                  controller: _ensureController,
+                  instruction: exerciseInstruction,
+                  onFinished: _toResult,
+                  exerciseContext: _exerciseContext,
+                ),
+              _Stage.result => ResultView(
+                  snapshot: _ensureController.session.value,
+                  exerciseContext: _exerciseContext,
+                  practiceComplete: _sequence.value.sequenceComplete,
+                  canContinue: _sequence.value.sequenceComplete,
+                  onRetry: _retry,
+                  onContinue: _continue,
+                ),
+            };
+          },
+        ),
       ),
     );
   }

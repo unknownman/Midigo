@@ -304,6 +304,24 @@ class PracticeSessionController {
   /// await so concurrent calls observe it immediately.
   bool _completionInProgress = false;
 
+  /// Guards against overlapping abandonments of the same engagement.
+  ///
+  /// [abandonAttempt] is async too (stop capture -> abandon -> end interaction
+  /// -> refresh). A Back navigation and the [dispose] safety net can both
+  /// reach it in the same frame, so the same synchronous flag is set before the
+  /// first await. It is mutually exclusive with [_completionInProgress]: an
+  /// in-flight evaluation is never abandoned half-way, and an engagement being
+  /// abandoned is never evaluated half-way.
+  bool _abandonInProgress = false;
+
+  /// Whether [dispose] has run.
+  ///
+  /// Once disposed the learner-facing snapshot must never be written again, so
+  /// every snapshot-producing path ([_refresh], [_resetLiveProjection]) becomes
+  /// a no-op. The runtime/Evidence end itself is unaffected: it is synchronous
+  /// and has no notifier in it.
+  bool _disposed = false;
+
   Future<List<MidiSourceInfo>> listSources() => discovery.listSources();
 
   /// Connects to [source], returning whether the practice session is now
@@ -440,6 +458,9 @@ class PracticeSessionController {
   /// Clears the live pressed projection at an attempt boundary or disconnect so
   /// no stale keys bleed into the next attempt, a Result, or the next lesson.
   void _resetLiveProjection() {
+    if (_disposed) {
+      return;
+    }
     if (_pressedNotes.isEmpty && session.value.pressedNotes.isEmpty) {
       return;
     }
@@ -500,7 +521,8 @@ class PracticeSessionController {
   Future<void> endAttempt() async {
     if (!_interactionStarted ||
         !session.value.attemptInProgress ||
-        _completionInProgress) {
+        _completionInProgress ||
+        _abandonInProgress) {
       return;
     }
     _completionInProgress = true;
@@ -586,35 +608,78 @@ class PracticeSessionController {
     _endInteraction(PracticeInteractionEndReason.completed);
   }
 
+  /// Ends the open practice interaction because the learner left without
+  /// completing it.
+  ///
+  /// This is the abandonment boundary (RT-009): the learner engaged with the
+  /// practice surface and then left - the learner closed the screen, pressed
+  /// Back, or the session was torn down - before finishing the focus item. The
+  /// open Attempt (if any) becomes `abandoned`, the Practice Interaction ends
+  /// with [PracticeInteractionEndReason.abandoned], and Evidence records the
+  /// closed window.
+  ///
+  /// Abandonment never grades: no `EvaluationResult` is produced, no stars are
+  /// created, `LessonProgress` is not mutated, and the Review Scheduler is
+  /// never consulted (Review Scheduler Contract §23). The only thing that
+  /// happens is the end of the engagement, which is exactly what supplies
+  /// EVG-019's `earlierInteraction.ended_at` operand.
+  ///
+  /// Ordering is contractual: MIDI capture stops first, so no further raw event
+  /// can belong to the attempt that is being abandoned (the same strict
+  /// capture-before-outcome boundary the completion path uses). Only then is
+  /// the interaction ended.
+  ///
+  /// Idempotent by construction: with no open interaction, after an explicit
+  /// abandonment, after an explicit completion, or after [dispose], this is a
+  /// no-op and never a second interaction end.
+  Future<void> abandonAttempt() async {
+    if (!_interactionStarted ||
+        _disposed ||
+        _completionInProgress ||
+        _abandonInProgress) {
+      return;
+    }
+    _abandonInProgress = true;
+    try {
+      // Strict boundary: capture stops before the interaction is considered
+      // ended, so no event arriving afterwards can be attributed to this
+      // abandoned attempt.
+      await _capture.stop();
+      // A concurrent dispose may have ended the interaction while we awaited.
+      if (!_interactionStarted || !_runtime.hasOpenInteraction) {
+        return;
+      }
+      if (session.value.attemptInProgress) {
+        final attempt = _runtime.currentItems.first.attempts.last;
+        _runtime.abandonAttempt(attempt.id);
+      }
+      _endInteraction(PracticeInteractionEndReason.abandoned);
+      _resetLiveProjection();
+      await _refresh(attemptInProgress: false);
+    } finally {
+      _abandonInProgress = false;
+    }
+  }
+
   /// The single interaction-end path of this session.
   ///
   /// The Practice Runtime stamps `ended_at` from the practice clock (RT-004 /
   /// RT-012: never MIDI capture time, never the evaluation layer) and the closed
   /// interaction is reported to Evidence, which keeps it as its own immutable
   /// interaction window rather than back-writing any contribution
-  /// (EVG-019/EVG-021). Completion and abandonment share it, so neither can
-  /// drift from the other's temporal semantics.
+  /// (EVG-019/EVG-021). Completion, abandonment and disposal share it, so
+  /// neither can drift from the other's temporal semantics.
+  ///
+  /// Idempotent: ending an interaction that is not open is a no-op, so the
+  /// first end always wins and no second window can ever be reported.
   void _endInteraction(PracticeInteractionEndReason reason) {
+    if (!_runtime.hasOpenInteraction) {
+      _interactionStarted = false;
+      return;
+    }
     final interaction = _runtime.endInteraction(reason: reason);
     _interactionStarted = false;
     evidence.recordInteractionEnd(interaction);
-  }
-
-  /// Abandons the current attempt and the open interaction.
-  Future<void> abandonAttempt() async {
-    if (!_interactionStarted) {
-      return;
-    }
-    if (session.value.attemptInProgress) {
-      final attempt = _runtime.currentItems.first.attempts.last;
-      _runtime.abandonAttempt(attempt.id);
-    }
-    // Ending an interaction is what supplies EVG-019's second gap operand for
-    // every contribution it produced, so it is reported to Evidence here.
-    _endInteraction(PracticeInteractionEndReason.abandoned);
-    await _capture.stop();
-    await _refresh(attemptInProgress: false);
-    _resetLiveProjection();
   }
 
   /// Retries: arms a fresh attempt and restarts the capture buffer.
@@ -640,8 +705,14 @@ class PracticeSessionController {
   }
 
   Future<void> _refresh({required bool attemptInProgress}) async {
+    if (_disposed) {
+      return;
+    }
     final target = _target;
     final progress = await _currentProgress();
+    if (_disposed) {
+      return;
+    }
     final items = _runtime.currentItems;
     session.value = session.value.copyWith(
       isConnected: session.value.isConnected,
@@ -725,13 +796,37 @@ class PracticeSessionController {
         MidiConnectionError.unknown => 'Could not connect to that MIDI keyboard.',
       };
 
+  /// Releases every resource this session owns and closes the engagement.
+  ///
+  /// Disposal is the safety net for every exit path that did not already end
+  /// the Practice Interaction: a Back navigation races this (the screen calls
+  /// [abandonAttempt] first), a route replacement removes this screen without a
+  /// pop, and the app is torn down. If an interaction is still open here it is
+  /// ended as `abandoned` through the same [_endInteraction] path as an explicit
+  /// abandonment, so EVG-019's `earlierInteraction.ended_at` operand can never
+  /// be lost by a learner simply leaving.
+  ///
+  /// It never ends an interaction that is already closed: an interaction ended
+  /// by `completeInteraction()` or by an earlier abandonment is left exactly as
+  /// it is, so `completed` can never be rewritten to `abandoned` and no second
+  /// `EvidenceInteractionWindow` can be reported.
+  ///
+  /// The interaction end is synchronous and therefore always completes; only
+  /// the MIDI stream and capture teardown is fire-and-forget, because
+  /// `dispose()` cannot await. Capture teardown is initiated first so nothing
+  /// further is appended to the abandoned attempt's buffer.
   void dispose() {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
     final live = _liveSubscription;
     _liveSubscription = null;
     if (live != null) {
       unawaited(live.cancel());
     }
     unawaited(_capture.dispose());
+    _endInteraction(PracticeInteractionEndReason.abandoned);
     session.dispose();
   }
 }

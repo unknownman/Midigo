@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../midi/application/midi_device_connection.dart';
@@ -109,26 +111,36 @@ class _NormalPracticeScreenState extends State<NormalPracticeScreen> {
       target: target,
       fingerings: const FingeringCatalog().fingeringsFor(widget.lesson.targetId),
     );
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.lesson.title)),
-      body: ValueListenableBuilder<_NormalStage>(
-        valueListenable: _stage,
-        builder: (context, stage, _) {
-          return switch (stage) {
-            _NormalStage.practice => PracticeView(
-                controller: _controller,
-                instruction: instruction,
-                onFinished: _toResult,
-                exerciseContext: 'Practice · ${widget.lesson.subtitle}',
-              ),
-            _NormalStage.result => ResultView(
-                snapshot: _controller.session.value,
-                onRetry: _retry,
-                onContinue: _continue,
-                canContinue: true,
-              ),
-          };
-        },
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, _) {
+        // Leaving before Continue abandons the engagement (RT-009). Normal
+        // Practice is not Review: the Review Scheduler is never consulted here,
+        // so abandonment mutates neither the schedule nor lesson progress.
+        if (didPop) {
+          unawaited(_controller.abandonAttempt());
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.lesson.title)),
+        body: ValueListenableBuilder<_NormalStage>(
+          valueListenable: _stage,
+          builder: (context, stage, _) {
+            return switch (stage) {
+              _NormalStage.practice => PracticeView(
+                  controller: _controller,
+                  instruction: instruction,
+                  onFinished: _toResult,
+                  exerciseContext: 'Practice · ${widget.lesson.subtitle}',
+                ),
+              _NormalStage.result => ResultView(
+                  snapshot: _controller.session.value,
+                  onRetry: _retry,
+                  onContinue: _continue,
+                  canContinue: true,
+                ),
+            };
+          },
+        ),
       ),
     );
   }

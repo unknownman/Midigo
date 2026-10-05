@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../midi/application/midi_device_connection.dart';
@@ -155,19 +157,34 @@ class _ReviewSessionScreenState extends State<ReviewSessionScreen> {
     });
   }
 
+  /// Leaving the Review session before committing is an abandonment.
+  ///
+  /// A Back/exit is forwarded to the controller, which abandons the open
+  /// interaction (RT-009). It deliberately does NOT touch the scheduler: only
+  /// advancing past the Review Result via [_commitAndAdvance] commits a response,
+  /// so the item simply stays ready and due (Review Scheduler Contract §13.5).
+  void _handlePop(bool didPop) {
+    if (didPop) {
+      unawaited(_controller?.abandonAttempt());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Review')),
-      body: ValueListenableBuilder<_ReviewStage>(
-        valueListenable: _stage,
-        builder: (context, stage, _) {
-          final lesson = widget.catalog.lessonByTargetId(_skillId);
-          return switch (stage) {
-            _ReviewStage.practice => _buildPractice(lesson),
-            _ReviewStage.result => _buildResult(lesson),
-          };
-        },
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, _) => _handlePop(didPop),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Review')),
+        body: ValueListenableBuilder<_ReviewStage>(
+          valueListenable: _stage,
+          builder: (context, stage, _) {
+            final lesson = widget.catalog.lessonByTargetId(_skillId);
+            return switch (stage) {
+              _ReviewStage.practice => _buildPractice(lesson),
+              _ReviewStage.result => _buildResult(lesson),
+            };
+          },
+        ),
       ),
     );
   }
