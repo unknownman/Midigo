@@ -3,8 +3,8 @@ import 'package:miditutor/midi/domain/evaluation_result.dart';
 /// Response a learner gives to a scheduled review, per the Review Scheduler
 /// Contract v1.2.
 enum ReviewResponse {
-  successful,
-  unsuccessful,
+  successfulReview,
+  unsuccessfulReview,
   iAlreadyKnow,
 }
 
@@ -125,14 +125,14 @@ final class ReviewItem {
 
 /// Maps an evaluation result to the scheduler response the learner earned.
 ///
-/// `3 or more stars -> successful`, `0..2 stars -> unsuccessful`,
+/// `3 or more stars -> successfulReview`, `0..2 stars -> unsuccessfulReview`,
 /// `NotEnoughPerformanceResult` and null (no result, e.g. abandoned or
 /// invalidated) -> null, meaning no scheduler mutation is allowed.
 ReviewResponse? reviewResponseFor(EvaluationResult? result) {
   if (result is EvaluatedResult) {
     return result.stars >= 3
-        ? ReviewResponse.successful
-        : ReviewResponse.unsuccessful;
+        ? ReviewResponse.successfulReview
+        : ReviewResponse.unsuccessfulReview;
   }
   return null;
 }

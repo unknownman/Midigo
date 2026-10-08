@@ -79,7 +79,7 @@ void main() {
     test('a successful review doubles the interval and moves it out', () async {
       final registered = await makeEligible('major-c-rh-block');
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.successful);
+          'major-c-rh-block', ReviewResponse.successfulReview);
       final state = await scheduler.getState('major-c-rh-block');
       expect(state.currentIntervalDays, registered.currentIntervalDays * 2);
       expect(state.nextReviewAt,
@@ -91,7 +91,7 @@ void main() {
       // Drive 1 -> 2 -> 4 -> 8 -> 16 -> 21 -> 21.
       for (var i = 0; i < 6; i++) {
         await scheduler.recordReviewResponse(
-            'major-c-rh-block', ReviewResponse.successful);
+            'major-c-rh-block', ReviewResponse.successfulReview);
         final state = await scheduler.getState('major-c-rh-block');
         expect(state.currentIntervalDays, lessThanOrEqualTo(21));
       }
@@ -102,11 +102,11 @@ void main() {
     test('an unsuccessful review halves the interval', () async {
       await makeEligible('major-c-rh-block');
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.successful);
+          'major-c-rh-block', ReviewResponse.successfulReview);
       final boosted = await scheduler.getState('major-c-rh-block');
       expect(boosted.currentIntervalDays, 2);
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.unsuccessful);
+          'major-c-rh-block', ReviewResponse.unsuccessfulReview);
       final state = await scheduler.getState('major-c-rh-block');
       expect(state.currentIntervalDays, 1);
     });
@@ -114,7 +114,7 @@ void main() {
     test('an unsuccessful review floors the interval at Dmin = 1', () async {
       await makeEligible('major-c-rh-block');
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.unsuccessful);
+          'major-c-rh-block', ReviewResponse.unsuccessfulReview);
       final state = await scheduler.getState('major-c-rh-block');
       expect(state.currentIntervalDays, SpacedReviewScheduler.minimumIntervalDays);
       expect(state.currentIntervalDays, 1);
@@ -125,7 +125,7 @@ void main() {
       // Drive to interval 8.
       for (var i = 0; i < 3; i++) {
         await scheduler.recordReviewResponse(
-            'major-c-rh-block', ReviewResponse.successful);
+            'major-c-rh-block', ReviewResponse.successfulReview);
       }
       final boosted = await scheduler.getState('major-c-rh-block');
       expect(boosted.currentIntervalDays, 8);
@@ -147,7 +147,7 @@ void main() {
     test('successful reviews increment counts and keep the invariant', () async {
       await makeEligible('major-c-rh-block');
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.successful);
+          'major-c-rh-block', ReviewResponse.successfulReview);
       final state = await scheduler.getState('major-c-rh-block');
       expect(state.reviewCount, 1);
       expect(state.successfulReviewCount, 1);
@@ -159,7 +159,7 @@ void main() {
     test('unsuccessful reviews increment counts and keep the invariant', () async {
       await makeEligible('major-c-rh-block');
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.unsuccessful);
+          'major-c-rh-block', ReviewResponse.unsuccessfulReview);
       final state = await scheduler.getState('major-c-rh-block');
       expect(state.reviewCount, 1);
       expect(state.unsuccessfulReviewCount, 1);
@@ -187,7 +187,7 @@ void main() {
         reviewCount: 1,
         successfulReviewCount: 1,
         unsuccessfulReviewCount: 0,
-        lastResponse: ReviewResponse.successful,
+        lastResponse: ReviewResponse.successfulReview,
       );
       final highCount = ReviewScheduleState(
         skillId: 'x',
@@ -197,16 +197,16 @@ void main() {
         reviewCount: 42,
         successfulReviewCount: 40,
         unsuccessfulReviewCount: 2,
-        lastResponse: ReviewResponse.successful,
+        lastResponse: ReviewResponse.successfulReview,
       );
       final a = SpacedReviewScheduler.transition(
         state: lowCount,
-        response: ReviewResponse.successful,
+        response: ReviewResponse.successfulReview,
         now: clock.current,
       );
       final b = SpacedReviewScheduler.transition(
         state: highCount,
-        response: ReviewResponse.successful,
+        response: ReviewResponse.successfulReview,
         now: clock.current,
       );
       expect(a.currentIntervalDays, b.currentIntervalDays);
@@ -244,7 +244,7 @@ void main() {
     test('a recorded response returns an updated immutable state', () async {
       final before = await makeEligible('major-c-rh-block');
       await scheduler.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.successful);
+          'major-c-rh-block', ReviewResponse.successfulReview);
       expect(before.reviewCount, 0);
       expect(before.currentIntervalDays, 1);
       final after = await scheduler.getState('major-c-rh-block');
@@ -254,14 +254,14 @@ void main() {
   });
 
   group('reviewResponseFor mapping (Contract §9)', () {
-    test('3 stars and above maps to successful', () {
-      expect(reviewResponseFor(result(5)), ReviewResponse.successful);
-      expect(reviewResponseFor(result(3)), ReviewResponse.successful);
+    test('3 stars and above maps to successfulReview', () {
+      expect(reviewResponseFor(result(5)), ReviewResponse.successfulReview);
+      expect(reviewResponseFor(result(3)), ReviewResponse.successfulReview);
     });
 
-    test('0..2 stars maps to unsuccessful', () {
-      expect(reviewResponseFor(result(2)), ReviewResponse.unsuccessful);
-      expect(reviewResponseFor(result(0)), ReviewResponse.unsuccessful);
+    test('0..2 stars maps to unsuccessfulReview', () {
+      expect(reviewResponseFor(result(2)), ReviewResponse.unsuccessfulReview);
+      expect(reviewResponseFor(result(0)), ReviewResponse.unsuccessfulReview);
     });
 
     test('NotEnoughPerformanceResult maps to null (no mutation)', () {
@@ -273,6 +273,114 @@ void main() {
 
     test('null result (abandoned/invalidated) maps to null', () {
       expect(reviewResponseFor(null), isNull);
+    });
+  });
+
+  group('response vocabulary alignment (Contract §7)', () {
+    test('ReviewResponse values are exactly the contract vocabulary', () {
+      expect(
+        [for (final response in ReviewResponse.values) response.name],
+        ['successfulReview', 'unsuccessfulReview', 'iAlreadyKnow'],
+      );
+    });
+
+    test('each response serializes to its canonical contract name', () {
+      expect(ReviewResponse.successfulReview.name, 'successfulReview');
+      expect(ReviewResponse.unsuccessfulReview.name, 'unsuccessfulReview');
+      expect(ReviewResponse.iAlreadyKnow.name, 'iAlreadyKnow');
+    });
+
+    test('lastResponse round-trips through toMap/fromMap for every response',
+        () {
+      for (final response in ReviewResponse.values) {
+        final state = ReviewScheduleState(
+          skillId: 'major-c-rh-block',
+          reviewEligible: true,
+          nextReviewAt: start.add(const Duration(days: 1)),
+          currentIntervalDays: 1,
+          reviewCount: 1,
+          successfulReviewCount: 1,
+          unsuccessfulReviewCount: 0,
+          lastResponse: response,
+        );
+        final map = state.toMap();
+        expect(map['lastResponse'], response.name);
+        final decoded = ReviewScheduleState.fromMap(map);
+        expect(decoded.lastResponse, response);
+      }
+    });
+
+    test('fromMap rejects a non-canonical legacy response name', () {
+      final map = ReviewScheduleState(
+        skillId: 'major-c-rh-block',
+        reviewEligible: true,
+        nextReviewAt: start.add(const Duration(days: 1)),
+        currentIntervalDays: 1,
+        reviewCount: 0,
+        successfulReviewCount: 0,
+        unsuccessfulReviewCount: 0,
+        lastResponse: ReviewResponse.successfulReview,
+      ).toMap()
+        ..['lastResponse'] = 'successful';
+      expect(
+        () => ReviewScheduleState.fromMap(map),
+        throwsFormatException,
+      );
+    });
+
+    test('the three transitions are unchanged by the vocabulary alignment',
+        () {
+      ReviewScheduleState state() => ReviewScheduleState(
+            skillId: 'major-c-rh-block',
+            reviewEligible: true,
+            nextReviewAt: start,
+            currentIntervalDays: 8,
+            reviewCount: 5,
+            successfulReviewCount: 3,
+            unsuccessfulReviewCount: 2,
+            lastResponse: ReviewResponse.successfulReview,
+          );
+
+      final success = SpacedReviewScheduler.transition(
+        state: state(),
+        response: ReviewResponse.successfulReview,
+        now: start,
+      );
+      expect(success.currentIntervalDays, 16); // min(8 * 2, 21)
+      expect(success.reviewCount, 6);
+      expect(success.successfulReviewCount, 4);
+      expect(success.unsuccessfulReviewCount, 2);
+
+      final failure = SpacedReviewScheduler.transition(
+        state: state(),
+        response: ReviewResponse.unsuccessfulReview,
+        now: start,
+      );
+      expect(failure.currentIntervalDays, 4); // max(8 ~/ 2, 1)
+      expect(failure.reviewCount, 6);
+      expect(failure.successfulReviewCount, 3);
+      expect(failure.unsuccessfulReviewCount, 3);
+
+      // Contract §11/§17: iAlreadyKnow increments none of the counts.
+      final iak = SpacedReviewScheduler.transition(
+        state: state(),
+        response: ReviewResponse.iAlreadyKnow,
+        now: start,
+      );
+      expect(iak.currentIntervalDays, 4); // max(8 ~/ 2, 1)
+      expect(iak.reviewCount, 5);
+      expect(iak.successfulReviewCount, 3);
+      expect(iak.unsuccessfulReviewCount, 2);
+      expect(iak.lastResponse, ReviewResponse.iAlreadyKnow);
+
+      expect(
+        success.reviewCount,
+        success.successfulReviewCount + success.unsuccessfulReviewCount,
+      );
+      expect(
+        failure.reviewCount,
+        failure.successfulReviewCount + failure.unsuccessfulReviewCount,
+      );
     });
   });
 
@@ -300,7 +408,7 @@ void main() {
       );
       await scheduling.registerEligibleSkill('major-c-rh-block');
       await scheduling.recordReviewResponse(
-          'major-c-rh-block', ReviewResponse.successful);
+          'major-c-rh-block', ReviewResponse.successfulReview);
 
       final reloaded = SpacedReviewScheduler(
         store: JsonReviewScheduleStore(root: dir),

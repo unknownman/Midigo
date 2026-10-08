@@ -130,7 +130,7 @@ void main() {
       expect(state.successfulReviewCount, 1);
       expect(state.unsuccessfulReviewCount, 0);
       expect(state.currentIntervalDays, 2);
-      expect(state.lastResponse, ReviewResponse.successful);
+      expect(state.lastResponse, ReviewResponse.successfulReview);
       expect(state.nextReviewAt,
           clock.current.add(const Duration(days: 2)));
     });
@@ -153,7 +153,7 @@ void main() {
       expect(state.unsuccessfulReviewCount, 1);
       expect(state.currentIntervalDays,
           SpacedReviewScheduler.minimumIntervalDays);
-      expect(state.lastResponse, ReviewResponse.unsuccessful);
+      expect(state.lastResponse, ReviewResponse.unsuccessfulReview);
     });
 
     testWidgets('review never modifies lesson progress (H2.9.10)',
@@ -194,7 +194,7 @@ void main() {
       expect(state.reviewCount, 1);
       expect(state.successfulReviewCount, 1);
       expect(state.unsuccessfulReviewCount, 0);
-      expect(state.lastResponse, ReviewResponse.successful);
+      expect(state.lastResponse, ReviewResponse.successfulReview);
     });
 
     testWidgets('a NEP review changes nothing and the item stays due',

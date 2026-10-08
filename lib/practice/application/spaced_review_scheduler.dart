@@ -94,11 +94,11 @@ final class SpacedReviewScheduler implements ReviewScheduler {
     int unsuccessfulCount = state.unsuccessfulReviewCount;
     int reviewCount = state.reviewCount;
     switch (response) {
-      case ReviewResponse.successful:
+      case ReviewResponse.successfulReview:
         interval = _capInterval(previousInterval * 2);
         successfulCount += 1;
         reviewCount += 1;
-      case ReviewResponse.unsuccessful:
+      case ReviewResponse.unsuccessfulReview:
         interval = _floorInterval(previousInterval ~/ 2);
         unsuccessfulCount += 1;
         reviewCount += 1;
