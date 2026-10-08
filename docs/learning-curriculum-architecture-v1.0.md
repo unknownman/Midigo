@@ -84,7 +84,9 @@ lessons and their internal exercise sequences, which produces practice through
 the Practice Runtime. It is governed by the MVP Product Contract (curriculum is
 the product contract's domain, not the UX contract's, not the target factory's).
 The `ExpectedMusicalTargetFactory` "does not implement the curriculum"; the
-`Slice1Catalog` is a fixed boundary catalog, not a full Exercise Generator.
+original `Slice1Catalog` (removed in H2.17 — `LearningCatalog` now owns
+curriculum identity) was a fixed boundary catalog, not a full Exercise
+Generator.
 
 ### 2.3 Spaced Review
 

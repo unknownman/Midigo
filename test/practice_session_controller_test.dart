@@ -14,9 +14,9 @@ import 'package:miditutor/midi/domain/midi_source_info.dart';
 import 'package:miditutor/midi/domain/raw_midi_event.dart';
 import 'package:miditutor/practice/application/evaluation_flow.dart';
 import 'package:miditutor/practice/application/in_memory_lesson_progress_store.dart';
+import 'package:miditutor/practice/application/learning_catalog.dart';
 import 'package:miditutor/practice/application/lesson_progress_service.dart';
 import 'package:miditutor/practice/application/practice_session_controller.dart';
-import 'package:miditutor/practice/application/slice1_catalog.dart';
 import 'package:miditutor/practice/domain/attempt.dart';
 import 'package:miditutor/practice/domain/practice_clock.dart';
 import 'package:miditutor/practice/domain/practice_exercise.dart';
@@ -266,7 +266,7 @@ void main() {
     expect(attempt.endedAt, isNotNull);
 
     final progress =
-        await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+        await controller.progressService.loadProgress(LearningCatalog.allLessons.first.targetId);
     expect(progress.stars, 5);
     expect(progress.attemptCount, 1);
   });
@@ -688,7 +688,7 @@ void main() {
       expect(item.attempts, hasLength(1));
       expect(item.attempts.last.state, AttemptState.completed);
       final progress =
-          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+          await controller.progressService.loadProgress(LearningCatalog.allLessons.first.targetId);
       expect(progress.attemptCount, 1);
     });
 
@@ -704,7 +704,7 @@ void main() {
       final item = controller.runtime.currentInteraction!.items.first;
       expect(item.attempts, hasLength(1));
       final progress =
-          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+          await controller.progressService.loadProgress(LearningCatalog.allLessons.first.targetId);
       expect(progress.attemptCount, 1);
       expect(controller.session.value.latestCompletedResult, isA<EvaluatedResult>());
     });
@@ -758,7 +758,7 @@ void main() {
         isA<NotEnoughPerformanceResult>(),
       );
       final progress =
-          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+          await controller.progressService.loadProgress(LearningCatalog.allLessons.first.targetId);
       expect(progress.stars, 0);
       expect(progress.attemptCount, 1);
     });
@@ -772,7 +772,7 @@ void main() {
 
       expect(controller.session.value.latestCompletedResult, isA<EvaluatedResult>());
       final progress =
-          await controller.progressService.loadProgress(Slice1Catalog.cMajorTargetId);
+          await controller.progressService.loadProgress(LearningCatalog.allLessons.first.targetId);
       expect(progress.stars, 0);
       expect(progress.attemptCount, 1);
     });

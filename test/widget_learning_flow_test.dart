@@ -6,8 +6,8 @@ import 'package:miditutor/midi/domain/evaluation_result.dart';
 import 'package:miditutor/midi/domain/midi_connection_error.dart';
 import 'package:miditutor/midi/domain/midi_connection_session.dart';
 import 'package:miditutor/practice/application/in_memory_lesson_progress_store.dart';
+import 'package:miditutor/practice/application/learning_catalog.dart';
 import 'package:miditutor/practice/application/lesson_progress_service.dart';
-import 'package:miditutor/practice/application/slice1_catalog.dart';
 
 import 'fakes.dart';
 
@@ -192,7 +192,7 @@ void main() {
       findsNWidgets(10),
     );
     final progress = await LessonProgressService(store: store)
-        .loadProgress(Slice1Catalog.cMajorTargetId);
+        .loadProgress(LearningCatalog.allLessons.first.targetId);
     expect(progress.stars, 0);
     expect(progress.attemptCount, 1);
   });
@@ -222,7 +222,7 @@ void main() {
       (WidgetTester tester) async {
     await tester.pumpWidget(app());
     await LessonProgressService(store: store).recordResult(
-      targetId: Slice1Catalog.cMajorTargetId,
+      targetId: LearningCatalog.allLessons.first.targetId,
       result: EvaluatedResult(stars: 3, dimensions: const []),
     );
     await tester.pumpAndSettle();
@@ -242,7 +242,7 @@ void main() {
     final service = LessonProgressService(store: store);
     for (var i = 0; i < 2; i++) {
       await service.recordResult(
-        targetId: Slice1Catalog.cMajorTargetId,
+        targetId: LearningCatalog.allLessons.first.targetId,
         result: EvaluatedResult(stars: 5, dimensions: const []),
       );
     }
@@ -267,7 +267,7 @@ void main() {
     final service = LessonProgressService(store: store);
     for (var i = 0; i < 2; i++) {
       await service.recordResult(
-        targetId: Slice1Catalog.cMajorTargetId,
+        targetId: LearningCatalog.allLessons.first.targetId,
         result: EvaluatedResult(stars: 5, dimensions: const []),
       );
     }
@@ -309,7 +309,7 @@ void main() {
       (WidgetTester tester) async {
     await tester.pumpWidget(app());
     await LessonProgressService(store: store).recordResult(
-      targetId: Slice1Catalog.cMajorTargetId,
+      targetId: LearningCatalog.allLessons.first.targetId,
       result: EvaluatedResult(
         stars: 5,
         dimensions: const [],
@@ -624,7 +624,7 @@ void main() {
       findsNWidgets(5),
     );
     final progress = await LessonProgressService(store: store)
-        .loadProgress(Slice1Catalog.cMajorTargetId);
+        .loadProgress(LearningCatalog.allLessons.first.targetId);
     expect(progress.attemptCount, 1);
     expect(progress.stars, 5);
   });
@@ -638,7 +638,7 @@ void main() {
     final service = LessonProgressService(store: store);
     for (var i = 0; i < 2; i++) {
       await service.recordResult(
-        targetId: Slice1Catalog.cMajorTargetId,
+        targetId: LearningCatalog.allLessons.first.targetId,
         result: EvaluatedResult(stars: 5, dimensions: const []),
       );
     }

@@ -6,10 +6,11 @@ import '../domain/learning_lesson.dart';
 ///
 /// This is a boundary only - a fixed catalog listing six deterministic lessons
 /// in stable order. Lesson identities and target ids are pinned and stable
-/// (no UUIDs, no Random, no clock, no array-index-as-identity). Lesson 1
-/// intentionally reuses the Slice-1 canonical identities
-/// (`lesson-major-c-rh-block` / `major-c-rh-block`) so all Slice-1 persisted
-/// progress keeps loading.
+/// (no UUIDs, no Random, no clock, no array-index-as-identity). This catalog
+/// is the sole owner of those identities: Lesson 1 carries the original
+/// Slice-1 values (`lesson-major-c-rh-block` / `major-c-rh-block`) so all
+/// Slice-1 persisted progress keeps loading. The Slice-1 boundary catalog
+/// that once declared those constants was removed in H2.17.
 ///
 /// The catalog owns the musical forms (quality/root/hand/mode) per lesson so
 /// the curriculum domain (`LearningLesson`) stays free of MIDI types. Targets

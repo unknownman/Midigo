@@ -54,7 +54,7 @@ Home → Review ("No reviews due" — empty-state placeholder, no scheduler)
 | `lesson_progress.dart` | `LessonProgress` (targetId, stars, attemptCount) + `LessonProgressStore` interface. |
 | `lesson_progress_service.dart` | Applies H2.9J frozen policy: only `EvaluatedResult.stars` accumulate; `NotEnoughPerformanceResult` records an attempt but adds no stars; capped at `lessonStarCapacity: 10`, monotonic, no decay, separate from mastery. |
 | `in_memory_lesson_progress_store.dart` / `json_lesson_progress_store.dart` | Store impls. JSON file store: deterministic map `{targetId: progress}`, root `Directory` injected (macOS Application Support default in production). |
-| `slice1_catalog.dart` | Slice-1 producer: one lesson "C Major" → one `ExerciseInstance` (`major-c-rh-block`). Boundary only — **not** a full Exercise Generator. |
+| `slice1_catalog.dart` | Slice-1 producer: one lesson "C Major" → one `ExerciseInstance` (`major-c-rh-block`). Boundary only — **not** a full Exercise Generator. Removed in H2.17 as redundant with `LearningCatalog`. |
 | `practice_session_controller.dart` | **MIDI + practice boundary.** Owns discovery/connection/event-stream/capture + `PracticeRuntime` + `EvaluationFlowService` + `LessonProgressService`. Exposes a narrow UI-facing `ValueNotifier<PracticeUiState>` and methods (list/connect/disconnect, startAttempt, endAttempt). UI never touches `EvaluationEngine` / `RawMidiEvent` / CoreMIDI. |
 
 ### New — Presentation (`lib/ui/`)

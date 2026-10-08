@@ -4,8 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:miditutor/main.dart';
 import 'package:miditutor/midi/domain/evaluation_result.dart';
 import 'package:miditutor/practice/application/in_memory_lesson_progress_store.dart';
+import 'package:miditutor/practice/application/learning_catalog.dart';
 import 'package:miditutor/practice/application/lesson_progress_service.dart';
-import 'package:miditutor/practice/application/slice1_catalog.dart';
 
 import 'fakes.dart';
 
@@ -179,7 +179,7 @@ void main() {
     // Pre-complete half of lesson 1 so a single 5-star practice completes it
     // and unlocks lesson 2 (arpeggio).
     await LessonProgressService(store: store).recordResult(
-      targetId: Slice1Catalog.cMajorTargetId,
+      targetId: LearningCatalog.allLessons.first.targetId,
       result: EvaluatedResult(stars: 5, dimensions: const []),
     );
     await tester.pumpAndSettle();

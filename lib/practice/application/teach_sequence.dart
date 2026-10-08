@@ -1,7 +1,7 @@
 import '../../midi/domain/expected_musical_target.dart';
 import '../domain/learning_lesson.dart';
+import 'learning_catalog.dart';
 import 'lesson_instruction.dart';
-import 'slice1_catalog.dart';
 import 'teach_step.dart';
 
 /// Authored Teach content builder for the Learning Path lessons.
@@ -106,14 +106,16 @@ final class TeachSequence {
   /// Builds the ordered Teach steps for [lesson], presenting [instruction].
   ///
   /// Deterministic: the same lesson always yields the same steps. The primary
-  /// C Major lesson returns the verbatim §13 sequence; every other lesson gets
-  /// the same documented arc instantiated from its frozen target/fingering.
+  /// lesson (the canonical first lesson of [LearningCatalog], identified
+  /// through the catalog rather than a local constant) returns the verbatim
+  /// §13 sequence; every other lesson gets the same documented arc
+  /// instantiated from its own frozen target/fingering.
   List<TeachStep> build({
     required LearningLesson lesson,
     required LessonInstruction instruction,
   }) {
     final steps =
-        lesson.id == Slice1Catalog.cMajorLessonId
+        lesson.id == LearningCatalog.allLessons.first.id
         ? cMajorVerbatim
         : _adapted(instruction);
     if (steps.isEmpty) {

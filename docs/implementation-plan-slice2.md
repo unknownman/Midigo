@@ -62,9 +62,11 @@ exercise generator), mirroring the Slice-1 boundary:
 
 - Every id is deterministic and derived from the lesson definition — no UUID,
   no `Random`, no `DateTime`, no array-index-as-identity.
-- Lesson 1 reuses the Slice-1 canonical constants
-  (`Slice1Catalog.cMajorLessonId`, `Slice1Catalog.cMajorTargetId`), so **all
-  Slice-1 persisted progress loads unchanged**.
+- Lesson 1 carries the Slice-1 canonical identities
+  (`lesson-major-c-rh-block` / `major-c-rh-block`), so **all Slice-1 persisted
+  progress loads unchanged**. (`Slice1Catalog`, the boundary that once declared
+  those constants, was removed in H2.17; `LearningCatalog` is now their sole
+  owner.)
 - `LearningCatalog` exposes `allLessons`, `lessonById`, `nextLessonAfter`,
   `previousLessonBefore` — all null-safe for unknown ids.
 
