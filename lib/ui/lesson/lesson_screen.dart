@@ -38,6 +38,7 @@ class LessonScreen extends StatefulWidget {
     required this.progressService,
     required this.clock,
     this.exportSink,
+    this.sequenceBuilder,
   });
 
   final LearningLesson lesson;
@@ -48,6 +49,18 @@ class LessonScreen extends StatefulWidget {
   final LessonProgressService progressService;
   final PracticeClock clock;
   final RawMidiExportSink? exportSink;
+
+  /// Deterministic source of the lesson's Practice Sequence, defaulting to the
+  /// canonical [PracticeSequenceCatalog].
+  ///
+  /// The seam only decides WHICH sequence the lesson runs; the exercises still
+  /// execute through the exact same [PracticeSequenceController] /
+  /// [PracticeSessionController] pipeline, so an injected two-exercise lesson
+  /// traverses production behavior unchanged and the canonical N = 1 catalog
+  /// stays the default. Exercises in a sequence share the lesson's target id,
+  /// so lesson stars pool into the lesson's single persisted key (no new keys,
+  /// no migration).
+  final PracticeSequence Function(LearningLesson lesson)? sequenceBuilder;
 
   @override
   State<LessonScreen> createState() => _LessonScreenState();
@@ -93,8 +106,9 @@ class _LessonScreenState extends State<LessonScreen> {
   @override
   void initState() {
     super.initState();
-    _practiceSequence =
-        PracticeSequenceCatalog(widget.catalog).sequenceFor(widget.lesson);
+    final sequenceFor =
+        widget.sequenceBuilder ?? PracticeSequenceCatalog(widget.catalog).sequenceFor;
+    _practiceSequence = sequenceFor(widget.lesson);
     _sequence = PracticeSequenceController(sequence: _practiceSequence);
   }
 
@@ -138,14 +152,35 @@ class _LessonScreenState extends State<LessonScreen> {
     });
   }
 
-  /// Continues: closes the finished practice interaction, then opens the next
-  /// lesson when it became available, otherwise returns to the Learning Path.
-  /// Only reachable once the sequence completes.
+  /// Advances to the next exercise after the current one completed.
+  ///
+  /// Closes the finished exercise's interaction (the completion boundary of
+  /// that engagement) before moving on; [PracticeSequenceController.advanceExercise]
+  /// is a no-op unless the current exercise is completed and more remain, so a
+  /// repeated tap can never skip an exercise. The next exercise gets a fresh
+  /// session via [_ensureController]; the finished exercise's controller is
+  /// disposed when that happens, so at most one exercise session is ever live.
+  void _advance() {
+    _ensureController.completeInteraction();
+    _sequence.advanceExercise();
+    setState(() {
+      _stage.value = _Stage.practice;
+    });
+  }
+
+  /// Continues: steps to the next exercise when one remains, otherwise closes
+  /// the finished practice interaction and opens the next lesson when it became
+  /// available, or returns to the Learning Path. Only reachable once the
+  /// current exercise completed.
   ///
   /// Closing the interaction is the completion boundary of the practice
   /// engagement; the controller decides what that means for the runtime
   /// lifecycle, so this screen stays free of any temporal/evidence vocabulary.
   Future<void> _continue() async {
+    if (_sequence.value.canAdvance) {
+      _advance();
+      return;
+    }
     _ensureController.completeInteraction();
     await _ensureController.disconnect();
     if (!mounted) {
@@ -240,7 +275,7 @@ class _LessonScreenState extends State<LessonScreen> {
                   snapshot: _ensureController.session.value,
                   exerciseContext: _exerciseContext,
                   practiceComplete: _sequence.value.sequenceComplete,
-                  canContinue: _sequence.value.sequenceComplete,
+                  canContinue: _sequence.value.isCurrentExerciseCompleted,
                   onRetry: _retry,
                   onContinue: _continue,
                 ),

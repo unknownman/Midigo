@@ -35,6 +35,7 @@ class NormalPracticeScreen extends StatefulWidget {
     required this.captureFactory,
     required this.progressService,
     required this.clock,
+    this.sequenceBuilder,
   });
 
   final LearningLesson lesson;
@@ -44,6 +45,16 @@ class NormalPracticeScreen extends StatefulWidget {
   final MidiEventStream Function() captureFactory;
   final LessonProgressService progressService;
   final PracticeClock clock;
+
+  /// Deterministic sequence source, defaulting to the canonical
+  /// [PracticeSequenceCatalog] (H2.19).
+  ///
+  /// Normal Practice is deliberately pinned to the FIRST exercise of the
+  /// lesson's sequence - it is a focused working practice, never the full
+  /// lesson flow - so this seam lets a two-exercise lesson be supplied to the
+  /// screen without the screen becoming sequence-aware. However many exercises
+  /// the sequence carries, exactly `exercises.first` is executed.
+  final PracticeSequence Function(LearningLesson lesson)? sequenceBuilder;
 
   @override
   State<NormalPracticeScreen> createState() => _NormalPracticeScreenState();
@@ -62,10 +73,9 @@ class _NormalPracticeScreenState extends State<NormalPracticeScreen> {
   @override
   void initState() {
     super.initState();
-    _exercise = PracticeSequenceCatalog(widget.catalog)
-        .sequenceFor(widget.lesson)
-        .exercises
-        .first;
+    final sequenceFor =
+        widget.sequenceBuilder ?? PracticeSequenceCatalog(widget.catalog).sequenceFor;
+    _exercise = sequenceFor(widget.lesson).exercises.first;
     _controller = PracticeSessionController(
       discovery: widget.discovery,
       connection: widget.connection,

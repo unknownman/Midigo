@@ -47,8 +47,10 @@ class ResultView extends StatelessWidget {
   /// this session, §12). Shown as a distinct completion milestone.
   final bool practiceComplete;
 
-  /// Whether the learner may continue (Sequence complete). When false the
-  /// Continue action is disabled - a NEP or zero-star result never unlocks it.
+  /// Whether the learner may continue past this result (the current exercise
+  /// completed). For a single-exercise lesson this equals sequence completion;
+  /// in a multi-exercise lesson it also unlocks the step to the next exercise.
+  /// A NEP or zero-star result never unlocks it.
   final bool canContinue;
 
   @override
